@@ -1,0 +1,31 @@
+storage:
+  db_path: data/odds.duckdb
+
+# Si el crédito restante (GET /sports, coste 0) cae por debajo de este
+# margen tras descontar el coste estimado de la llamada, capture.py aborta
+# ESE target sin gastar nada. Ver "Guardrail de coste vs cron" en el plan
+# de spec 2 (docs/superpowers si se archiva, o el historial de la sesión).
+min_remaining_credits: 20
+
+targets:
+  - name: world_cup_2026
+    active: true
+    sport_key: soccer_fifa_world_cup
+    markets:
+      - h2h
+    sharp_book: pinnacle
+    soft_books:
+      - williamhill      # pendiente de confirmar cobertura real antes del primer capture real
+      - betvictor
+      - winamax_fr
+      - marathonbet
+    poll_interval_hours: 3   # documental; la cadencia real la fija crontab
+
+  # Ejemplo de liga futura (deshabilitada) -- añadirla es solo esto, 0 cambios de código:
+  # - name: mlb_2026
+  #   active: false
+  #   sport_key: baseball_mlb
+  #   markets: [h2h]
+  #   sharp_book: pinnacle
+  #   soft_books: [fanduel, draftkings]
+  #   poll_interval_hours: 3
