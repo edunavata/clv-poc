@@ -31,10 +31,14 @@ Sistema de detección de edges en apuestas deportivas basado en **Closing Line V
 - **Logging**: cualquier componente que consuma cuota o dinero real (llamadas a API, proxies) debe loggear el coste real de cada operación, no solo el resultado. Esto es así porque el coste ya ha causado sorpresas antes en este proyecto.
 - **Testing**: antes de dar por válida una pieza (cliente API, cálculo de CLV, etc.), demostrar con un output real y pequeño que hace lo esperado, no solo que el código "compila" o no lanza excepciones.
 
+## Guardrail de coste
+
+Ninguna llamada a un endpoint que consuma cuota (`/v4/sports/{sport}/odds`, `/v4/historical/...`) se ejecuta — ni se sugiere ejecutar — sin (a) calcular y mostrar el coste estimado primero y (b) confirmación explícita del usuario. El cliente en `client/odds_api.py` soporta `dry_run=True` por defecto en cualquier método que consuma cuota; solo gasta crédito real si se pasa `dry_run=False` explícitamente. Esta regla aplica tanto a Claude Code en sesiones futuras como a cualquier script del repo. Ver `scripts/verify_pinnacle.py` como ejemplo de referencia (confirmación interactiva antes de la única llamada que gasta crédito).
+
 ## Fuentes de datos ya evaluadas (no re-evaluar desde cero)
 
 - **The Odds API** (the-odds-api.com — cuidado, no confundir con el competidor theoddsapi.com) es la fuente principal en evaluación. Su mecánica de créditos: coste = `[nº markets] × [nº regions]`; usar el parámetro `bookmakers` en vez de `regions` permite agrupar hasta 10 bookmakers como si fuera 1 sola región, lo cual es más eficiente cuando solo interesan Pinnacle + unas pocas soft books concretas. Los endpoints `/sports` y `/sports/{sport}/events` no consumen cuota.
-- Sigue **pendiente de confirmación empírica** si Pinnacle está disponible en el tier gratuito. Cualquier tarea que dependa de esto debe verificarlo con una llamada real antes de construir encima.
+- **Confirmado empíricamente (2026-07-06, `scripts/verify_pinnacle.py`):** Pinnacle SÍ está disponible en el tier gratuito — llamada real a `/v4/sports/soccer_fifa_world_cup/odds?bookmakers=pinnacle,bet365_uk&markets=h2h` devolvió datos de Pinnacle en los 6 eventos consultados. Coste real: 1 crédito por llamada, tal como predice la fórmula. Cuota real de la key confirmada por headers: 500 créditos/mes, 0 usados antes de este test. `bet365_uk` no apareció en ninguno de los 6 eventos del Mundial 2026 consultados — no confirma ni descarta su cobertura general, solo que no tenía precio publicado para esos eventos concretos en el momento del test.
 
 ## Qué está fuera de alcance salvo que se diga lo contrario explícitamente
 
