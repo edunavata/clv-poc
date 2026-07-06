@@ -14,8 +14,10 @@ targets:
     markets:
       - h2h
     sharp_book: pinnacle
+    # Cobertura real confirmada 2026-07-06 (scripts/check_soft_book_coverage.py,
+    # 1 crédito real): los 4 tenían precio en los 6 eventos del Mundial en ese momento.
     soft_books:
-      - williamhill      # pendiente de confirmar cobertura real antes del primer capture real
+      - williamhill
       - betvictor
       - winamax_fr
       - marathonbet
