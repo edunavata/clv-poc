@@ -35,6 +35,10 @@ Sistema de detección de edges en apuestas deportivas basado en **Closing Line V
 
 Ninguna llamada a un endpoint que consuma cuota (`/v4/sports/{sport}/odds`, `/v4/historical/...`) se ejecuta — ni se sugiere ejecutar — sin (a) calcular y mostrar el coste estimado primero y (b) confirmación explícita del usuario. El cliente en `client/odds_api.py` soporta `dry_run=True` por defecto en cualquier método que consuma cuota; solo gasta crédito real si se pasa `dry_run=False` explícitamente. Esta regla aplica tanto a Claude Code en sesiones futuras como a cualquier script del repo. Ver `scripts/verify_pinnacle.py` como ejemplo de referencia (confirmación interactiva antes de la única llamada que gasta crédito).
 
+## Guardrail de control de versiones
+
+No se deja acumular un working tree con muchos cambios sin confirmar. Cada incremento verificado (tests en verde, output real comprobado) se commitea de inmediato, en commits atómicos y pequeños — una sola cosa lógica por commit, mensaje con prefijo `feat/fix/docs/chore/test/refactor` que explica el porqué, no solo el qué. No se mezclan conceptos distintos en un mismo commit (p. ej. dependencias + feature + docs van en commits separados). Si al empezar una tarea nueva `git status` ya muestra cambios pendientes de una tarea anterior sin commitear, se resuelven primero (commit o se pregunta) antes de seguir añadiendo más encima. Esta regla aplica tanto a Claude Code en sesiones futuras como a cualquier colaborador del repo.
+
 ## Fuentes de datos ya evaluadas (no re-evaluar desde cero)
 
 - **The Odds API** (the-odds-api.com — cuidado, no confundir con el competidor theoddsapi.com) es la fuente principal en evaluación. Su mecánica de créditos: coste = `[nº markets] × [nº regions]`; usar el parámetro `bookmakers` en vez de `regions` permite agrupar hasta 10 bookmakers como si fuera 1 sola región, lo cual es más eficiente cuando solo interesan Pinnacle + unas pocas soft books concretas. Los endpoints `/sports` y `/sports/{sport}/events` no consumen cuota.
