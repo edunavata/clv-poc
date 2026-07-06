@@ -45,6 +45,7 @@ htmlcov/
 # Project-specific
 .env
 .env.local
+notas/
 data/*.db
 data/*.duckdb
 data/*.sqlite
