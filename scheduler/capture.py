@@ -63,7 +63,9 @@ def parse_bookmaker_rows(event: dict, sport_key: str, captured_at: datetime) -> 
 def capture_target(
     client: OddsApiClient, con, target: Target, min_remaining_credits: int, captured_at: datetime
 ) -> CaptureResult:
-    estimate = client.get_odds(target.sport_key, markets=target.markets, bookmakers=target.bookmakers)
+    estimate = client.get_odds(
+        target.sport_key, markets=target.markets, bookmakers=target.bookmakers
+    )
     estimated_cost = estimate["estimated_cost"]
 
     usage = client.get_usage()

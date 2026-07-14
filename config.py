@@ -5,11 +5,11 @@ Un único módulo (no un paquete) porque el loader es pequeño; ver la sección
 como punto de confirmación explícita del gasto recurrente de scheduler/capture.py.
 """
 
-import os
 from dataclasses import dataclass
 from pathlib import Path
 
 import yaml
+from dotenv import load_dotenv as _load_dotenv
 
 REPO_ROOT = Path(__file__).resolve().parent
 
@@ -40,15 +40,8 @@ class AppConfig:
 
 
 def load_dotenv(path: Path = REPO_ROOT / ".env") -> None:
-    """Carga .env a mano (mismo patrón que scripts/verify_pinnacle.py), sin dependencia nueva."""
-    if not path.exists():
-        return
-    for line in path.read_text().splitlines():
-        line = line.strip()
-        if not line or line.startswith("#") or "=" not in line:
-            continue
-        key, _, value = line.partition("=")
-        os.environ.setdefault(key.strip(), value.strip())
+    """Carga variables de entorno usando python-dotenv."""
+    _load_dotenv(dotenv_path=path)
 
 
 def load_config(path: Path = REPO_ROOT / "config.yaml") -> AppConfig:

@@ -80,9 +80,7 @@ def test_capture_target_aborts_when_quota_margin_not_respected(target, tmp_path,
 def test_capture_target_isolates_api_failure(target, tmp_path, monkeypatch):
     monkeypatch.setenv("ODDS_API_KEY", "test-key")
     client = OddsApiClient()
-    monkeypatch.setattr(
-        client, "get_usage", lambda: {"remaining": "498", "used": "2", "last": "0"}
-    )
+    monkeypatch.setattr(client, "get_usage", lambda: {"remaining": "498", "used": "2", "last": "0"})
 
     def raise_error(*args, **kwargs):
         if kwargs.get("dry_run") is False:

@@ -12,9 +12,10 @@ Uso:
 """
 
 import argparse
-import os
 import sys
 from pathlib import Path
+
+from dotenv import load_dotenv
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO_ROOT))
@@ -27,17 +28,6 @@ SHARP_BOOK = "pinnacle"
 CANDIDATES = ["williamhill", "betvictor", "winamax_fr", "marathonbet"]
 
 
-def _load_dotenv(path: Path) -> None:
-    if not path.exists():
-        return
-    for line in path.read_text().splitlines():
-        line = line.strip()
-        if not line or line.startswith("#") or "=" not in line:
-            continue
-        key, _, value = line.partition("=")
-        os.environ.setdefault(key.strip(), value.strip())
-
-
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
@@ -45,7 +35,7 @@ def main() -> int:
     )
     args = parser.parse_args()
 
-    _load_dotenv(REPO_ROOT / ".env")
+    load_dotenv(REPO_ROOT / ".env")
 
     try:
         client = OddsApiClient()

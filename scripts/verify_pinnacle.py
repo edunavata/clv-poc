@@ -20,9 +20,10 @@ Uso:
 
 import argparse
 import logging
-import os
 import sys
 from pathlib import Path
+
+from dotenv import load_dotenv
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO_ROOT))
@@ -37,18 +38,6 @@ logging.basicConfig(level=logging.INFO, format="%(message)s")
 logger = logging.getLogger(__name__)
 
 
-def _load_dotenv(path: Path) -> None:
-    """Carga .env a mano (sin dependencia nueva) si las vars no están ya en el entorno."""
-    if not path.exists():
-        return
-    for line in path.read_text().splitlines():
-        line = line.strip()
-        if not line or line.startswith("#") or "=" not in line:
-            continue
-        key, _, value = line.partition("=")
-        os.environ.setdefault(key.strip(), value.strip())
-
-
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
@@ -58,7 +47,7 @@ def main() -> int:
     )
     args = parser.parse_args()
 
-    _load_dotenv(REPO_ROOT / ".env")
+    load_dotenv(REPO_ROOT / ".env")
 
     try:
         client = OddsApiClient()
@@ -82,8 +71,7 @@ def main() -> int:
             return 1
 
         print(
-            f"\n--- Paso 3/4: estimación de coste "
-            f"(bookmakers={BOOKMAKERS}, markets={MARKETS}) ---"
+            f"\n--- Paso 3/4: estimación de coste (bookmakers={BOOKMAKERS}, markets={MARKETS}) ---"
         )
         estimate = client.get_odds(SPORT, markets=MARKETS, bookmakers=BOOKMAKERS, dry_run=True)
         print(f"Coste estimado: {estimate['estimated_cost']} crédito(s) real(es).")
