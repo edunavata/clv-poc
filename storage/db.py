@@ -39,6 +39,47 @@ INSERT INTO snapshots
 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 """
 
+# Todos los snapshots pre-commence de las soft books de un target. A diferencia de
+# closing_lines NO colapsa a la última fila: devuelve cada snapshot, porque el análisis
+# de CLV es por-snapshot (queremos ver la trayectoria según se acerca el cierre).
+# El placeholder de books se expande en Python según cuántas soft books haya.
+SOFT_SNAPSHOTS_QUERY = """
+SELECT event_id, market, outcome, home_team, away_team, commence_time,
+       book, captured_at, odds
+FROM snapshots
+WHERE sport_key = ? AND captured_at < commence_time AND book IN ({books})
+"""
+
+# Mart derivado: se reconstruye entero en cada run (full refresh). No es append-only
+# como snapshots -- es una vista materializada del cálculo de CLV, siempre regenerable.
+CLV_SNAPSHOTS_SCHEMA = """
+CREATE OR REPLACE TABLE clv_snapshots (
+    sport_key                   VARCHAR NOT NULL,
+    event_id                    VARCHAR NOT NULL,
+    home_team                   VARCHAR NOT NULL,
+    away_team                   VARCHAR NOT NULL,
+    market                      VARCHAR NOT NULL,
+    outcome                     VARCHAR NOT NULL,
+    soft_book                   VARCHAR NOT NULL,
+    commence_time               TIMESTAMP NOT NULL,
+    captured_at                 TIMESTAMP NOT NULL,
+    hours_to_commence           DOUBLE NOT NULL,
+    soft_odds                   DOUBLE NOT NULL,
+    pinnacle_closing_odds       DOUBLE NOT NULL,
+    pinnacle_closing_captured_at TIMESTAMP NOT NULL,
+    pinnacle_fair_prob          DOUBLE NOT NULL,
+    clv                         DOUBLE NOT NULL
+)
+"""
+
+INSERT_CLV_QUERY = """
+INSERT INTO clv_snapshots
+    (sport_key, event_id, home_team, away_team, market, outcome, soft_book,
+     commence_time, captured_at, hours_to_commence, soft_odds,
+     pinnacle_closing_odds, pinnacle_closing_captured_at, pinnacle_fair_prob, clv)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+"""
+
 
 def get_connection(db_path: str | Path) -> duckdb.DuckDBPyConnection:
     """Abre (o crea) la base DuckDB en db_path y aplica el esquema (idempotente)."""
@@ -74,3 +115,41 @@ def insert_snapshot_rows(con: duckdb.DuckDBPyConnection, rows: list[dict]) -> in
 def closing_lines(con: duckdb.DuckDBPyConnection, sport_key: str, sharp_book: str) -> list[tuple]:
     """Tarea 7: última fila de sharp_book con captured_at < commence_time, por evento+outcome."""
     return con.execute(CLOSING_LINES_QUERY, [sport_key, sharp_book]).fetchall()
+
+
+def soft_snapshots(
+    con: duckdb.DuckDBPyConnection, sport_key: str, soft_books: list[str]
+) -> list[tuple]:
+    """Todos los snapshots pre-commence de las soft books dadas (sin colapsar). Vacío si no hay books."""
+    if not soft_books:
+        return []
+    placeholders = ", ".join("?" for _ in soft_books)
+    query = SOFT_SNAPSHOTS_QUERY.format(books=placeholders)
+    return con.execute(query, [sport_key, *soft_books]).fetchall()
+
+
+def replace_clv_snapshots(con: duckdb.DuckDBPyConnection, rows: list[dict]) -> int:
+    """Reconstruye la tabla clv_snapshots entera (full refresh) e inserta rows. Idempotente."""
+    con.execute(CLV_SNAPSHOTS_SCHEMA)
+    for row in rows:
+        con.execute(
+            INSERT_CLV_QUERY,
+            [
+                row["sport_key"],
+                row["event_id"],
+                row["home_team"],
+                row["away_team"],
+                row["market"],
+                row["outcome"],
+                row["soft_book"],
+                row["commence_time"],
+                row["captured_at"],
+                row["hours_to_commence"],
+                row["soft_odds"],
+                row["pinnacle_closing_odds"],
+                row["pinnacle_closing_captured_at"],
+                row["pinnacle_fair_prob"],
+                row["clv"],
+            ],
+        )
+    return len(rows)
