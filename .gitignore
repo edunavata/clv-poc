@@ -51,3 +51,4 @@ data/*.duckdb
 data/*.sqlite
 data/*.sqlite3
 .tokensave
+logs/

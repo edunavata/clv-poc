@@ -17,7 +17,28 @@ from config import AppConfig, load_config, load_dotenv
 from scheduler.capture import capture_target
 from storage.db import get_connection
 
-logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s")
+import os
+from logging.handlers import RotatingFileHandler
+
+
+def setup_logging():
+    os.makedirs("logs", exist_ok=True)
+    root_logger = logging.getLogger()
+    root_logger.setLevel(logging.INFO)
+
+    formatter = logging.Formatter("%(asctime)s [%(levelname)s] %(name)s: %(message)s")
+
+    ch = logging.StreamHandler(sys.stdout)
+    ch.setFormatter(formatter)
+
+    fh = RotatingFileHandler("logs/daemon.log", maxBytes=10 * 1024 * 1024, backupCount=5)
+    fh.setFormatter(formatter)
+
+    root_logger.handlers.clear()
+    root_logger.addHandler(ch)
+    root_logger.addHandler(fh)
+
+
 logger = logging.getLogger(__name__)
 
 # Configuración de captura
@@ -123,6 +144,7 @@ def schedule_captures(scheduler: BackgroundScheduler, config: AppConfig):
 
 
 def main(argv: list[str] | None = None) -> int:
+    setup_logging()
     load_dotenv()
     config = load_config()
 
@@ -141,7 +163,6 @@ def main(argv: list[str] | None = None) -> int:
         logger.info("Deteniendo demonio...")
         scheduler.shutdown()
         return 0
-    return 0
 
 
 if __name__ == "__main__":
