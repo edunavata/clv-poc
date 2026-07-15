@@ -90,6 +90,23 @@ def test_successful_discovery_replaces_target_jobs(scheduler):
     assert len(ids) > 0, "no reprogramó capturas tras discovery exitoso"
 
 
+def test_capture_jobs_have_misfire_grace_time(scheduler):
+    """Bug 2: default de APScheduler es 1s -- un job de cierre con leve retraso
+    (hilo ocupado, sleep de sistema) se descartaría sin traza. Debe tener margen."""
+    target = _target("wc", "soccer_fifa_world_cup")
+    config = _config([target])
+    client = FakeClient(events_by_sport={"soccer_fifa_world_cup": [_future_event()]})
+
+    daemon.schedule_captures(scheduler, config, client=client)
+
+    jobs = [j for j in scheduler.get_jobs() if j.id.startswith("capture_wc_")]
+    assert jobs, "no se programó ningún job de captura"
+    for job in jobs:
+        assert job.misfire_grace_time is not None and job.misfire_grace_time >= 60, (
+            f"job {job.id} sin margen de misfire suficiente: {job.misfire_grace_time}"
+        )
+
+
 def test_partial_failure_isolates_targets(scheduler):
     """Discovery falla en un target pero no en otro: cada uno se resuelve por separado."""
     good = _target("good", "sport_good")

@@ -135,6 +135,10 @@ def schedule_captures(
                 args=[target.name, config.db_path, config.min_remaining_credits],
                 id=job_id,
                 replace_existing=True,
+                # Default de APScheduler es 1s: un retraso mínimo (hilo ocupado, sleep
+                # de sistema) descartaría en silencio el poll de cierre, el dato de
+                # mayor valor. 90s cubre eso sin arriesgar capturar in-play.
+                misfire_grace_time=90,
             )
 
         logger.info("Programadas %d capturas para target %s", len(filtered_times), target.name)
