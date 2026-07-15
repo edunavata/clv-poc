@@ -21,6 +21,12 @@ def _row(captured_at, book, odds, outcome="Team A"):
     }
 
 
+def _row_stale(captured_at, api_last_update, book, odds, outcome="Team A"):
+    row = _row(captured_at, book, odds, outcome)
+    row["api_last_update"] = api_last_update
+    return row
+
+
 def test_schema_creation_is_idempotent(tmp_path):
     db_path = tmp_path / "odds.duckdb"
     get_connection(db_path).close()
@@ -54,3 +60,23 @@ def test_closing_lines_returns_last_pre_commence_sharp_row(tmp_path):
     row = result[0]
     assert row[0] == "evt1"  # event_id
     assert row[6] == 1.85  # closing_odds: la última fila sharp pre-commence
+
+
+def test_closing_lines_selects_by_api_last_update_not_captured_at(tmp_path):
+    con = get_connection(tmp_path / "odds.duckdb")
+
+    rows = [
+        # Sondeo temprano, pero es el precio realmente más reciente (api_last_update -6h).
+        _row_stale(COMMENCE - timedelta(hours=6), COMMENCE - timedelta(hours=6), "pinnacle", 2.00),
+        # Sondeo tardío (captured_at -1h) pero devuelve un precio viejo (api_last_update -8h):
+        # bajo la lógica antigua (arg_max por captured_at) este ganaba por error.
+        _row_stale(COMMENCE - timedelta(hours=1), COMMENCE - timedelta(hours=8), "pinnacle", 1.50),
+    ]
+    insert_snapshot_rows(con, rows)
+
+    result = closing_lines(con, "soccer_fifa_world_cup", "pinnacle")
+
+    assert len(result) == 1
+    row = result[0]
+    assert row[6] == 2.00  # closing_odds: gana el api_last_update más reciente (-6h), no el sondeo más tardío
+    assert row[7] == COMMENCE - timedelta(hours=6)  # closing_last_update

@@ -25,10 +25,10 @@ CREATE TABLE IF NOT EXISTS snapshots (
 
 CLOSING_LINES_QUERY = """
 SELECT event_id, market, outcome, home_team, away_team, commence_time,
-       arg_max(odds, captured_at) AS closing_odds,
-       max(captured_at)           AS closing_captured_at
+       arg_max(odds, api_last_update) AS closing_odds,
+       max(api_last_update)           AS closing_last_update
 FROM snapshots
-WHERE sport_key = ? AND book = ? AND captured_at < commence_time
+WHERE sport_key = ? AND book = ? AND api_last_update < commence_time
 GROUP BY event_id, market, outcome, home_team, away_team, commence_time
 """
 
@@ -54,21 +54,22 @@ WHERE sport_key = ? AND captured_at < commence_time AND book IN ({books})
 # como snapshots -- es una vista materializada del cálculo de CLV, siempre regenerable.
 CLV_SNAPSHOTS_SCHEMA = """
 CREATE OR REPLACE TABLE clv_snapshots (
-    sport_key                   VARCHAR NOT NULL,
-    event_id                    VARCHAR NOT NULL,
-    home_team                   VARCHAR NOT NULL,
-    away_team                   VARCHAR NOT NULL,
-    market                      VARCHAR NOT NULL,
-    outcome                     VARCHAR NOT NULL,
-    soft_book                   VARCHAR NOT NULL,
-    commence_time               TIMESTAMP NOT NULL,
-    captured_at                 TIMESTAMP NOT NULL,
-    hours_to_commence           DOUBLE NOT NULL,
-    soft_odds                   DOUBLE NOT NULL,
-    pinnacle_closing_odds       DOUBLE NOT NULL,
-    pinnacle_closing_captured_at TIMESTAMP NOT NULL,
-    pinnacle_fair_prob          DOUBLE NOT NULL,
-    clv                         DOUBLE NOT NULL
+    sport_key                    VARCHAR NOT NULL,
+    event_id                     VARCHAR NOT NULL,
+    home_team                    VARCHAR NOT NULL,
+    away_team                    VARCHAR NOT NULL,
+    market                       VARCHAR NOT NULL,
+    outcome                      VARCHAR NOT NULL,
+    soft_book                    VARCHAR NOT NULL,
+    commence_time                TIMESTAMP NOT NULL,
+    captured_at                  TIMESTAMP NOT NULL,
+    hours_to_commence            DOUBLE NOT NULL,
+    soft_odds                    DOUBLE NOT NULL,
+    pinnacle_closing_odds        DOUBLE NOT NULL,
+    pinnacle_closing_last_update TIMESTAMP NOT NULL,
+    hours_before_commence        DOUBLE NOT NULL,
+    pinnacle_fair_prob           DOUBLE NOT NULL,
+    clv                          DOUBLE NOT NULL
 )
 """
 
@@ -76,8 +77,9 @@ INSERT_CLV_QUERY = """
 INSERT INTO clv_snapshots
     (sport_key, event_id, home_team, away_team, market, outcome, soft_book,
      commence_time, captured_at, hours_to_commence, soft_odds,
-     pinnacle_closing_odds, pinnacle_closing_captured_at, pinnacle_fair_prob, clv)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+     pinnacle_closing_odds, pinnacle_closing_last_update, hours_before_commence,
+     pinnacle_fair_prob, clv)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 """
 
 
@@ -113,7 +115,8 @@ def insert_snapshot_rows(con: duckdb.DuckDBPyConnection, rows: list[dict]) -> in
 
 
 def closing_lines(con: duckdb.DuckDBPyConnection, sport_key: str, sharp_book: str) -> list[tuple]:
-    """Tarea 7: última fila de sharp_book con captured_at < commence_time, por evento+outcome."""
+    """Última fila de sharp_book por api_last_update < commence_time (timestamp de validez
+    del propio precio, no el instante de nuestro sondeo), por evento+outcome."""
     return con.execute(CLOSING_LINES_QUERY, [sport_key, sharp_book]).fetchall()
 
 
@@ -147,7 +150,8 @@ def replace_clv_snapshots(con: duckdb.DuckDBPyConnection, rows: list[dict]) -> i
                 row["hours_to_commence"],
                 row["soft_odds"],
                 row["pinnacle_closing_odds"],
-                row["pinnacle_closing_captured_at"],
+                row["pinnacle_closing_last_update"],
+                row["hours_before_commence"],
                 row["pinnacle_fair_prob"],
                 row["clv"],
             ],

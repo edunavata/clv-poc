@@ -10,7 +10,7 @@ closing_lines + devig y cada snapshot soft se compara contra ese número.
 LIMITACIÓN: devig normaliza sobre los outcomes de Pinnacle presentes en el cierre. Si
 a un mercado le falta algún outcome (p. ej. h2h de fútbol sin el empate en Pinnacle),
 la eliminación del overround queda sesgada. Se acepta para el POC; pinnacle_closing_
-captured_at por fila permite además auditar el sesgo "cierre real vs último poll".
+last_update por fila permite además auditar el sesgo "cierre real vs último poll".
 
 Uso:
     uv run python -m analysis.report                      # todos los targets activos
@@ -29,8 +29,8 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s")
 logger = logging.getLogger(__name__)
 
 # Índices de columna de closing_lines(): event_id, market, outcome, home, away,
-# commence, closing_odds, closing_captured_at.
-_C_EVENT, _C_MARKET, _C_OUTCOME, _C_ODDS, _C_CAPTURED = 0, 1, 2, 6, 7
+# commence, closing_odds, closing_last_update.
+_C_EVENT, _C_MARKET, _C_OUTCOME, _C_ODDS, _C_LAST_UPDATE = 0, 1, 2, 6, 7
 # Índices de soft_snapshots(): event_id, market, outcome, home, away, commence,
 # book, captured_at, odds.
 _S_EVENT, _S_MARKET, _S_OUTCOME, _S_HOME, _S_AWAY = 0, 1, 2, 3, 4
@@ -39,17 +39,17 @@ _S_COMMENCE, _S_BOOK, _S_CAPTURED, _S_ODDS = 5, 6, 7, 8
 
 def fair_probs_by_market(closing_rows: list[tuple]) -> dict[tuple[str, str], dict]:
     """Reagrupa las filas de cierre por (event_id, market), devig-a cada mercado completo
-    y devuelve por outcome su fair_prob, closing_odds y closing_captured_at.
+    y devuelve por outcome su fair_prob, closing_odds y closing_last_update.
 
     Función pura (sin DB): {(event_id, market): {outcome: {"fair_prob", "closing_odds",
-    "closing_captured_at"}}}.
+    "closing_last_update"}}}.
     """
     odds_by_market: dict[tuple[str, str], dict[str, float]] = {}
     meta_by_market: dict[tuple[str, str], dict[str, tuple]] = {}
     for row in closing_rows:
         key = (row[_C_EVENT], row[_C_MARKET])
         odds_by_market.setdefault(key, {})[row[_C_OUTCOME]] = row[_C_ODDS]
-        meta_by_market.setdefault(key, {})[row[_C_OUTCOME]] = row[_C_CAPTURED]
+        meta_by_market.setdefault(key, {})[row[_C_OUTCOME]] = row[_C_LAST_UPDATE]
 
     result: dict[tuple[str, str], dict] = {}
     for key, prices in odds_by_market.items():
@@ -58,7 +58,7 @@ def fair_probs_by_market(closing_rows: list[tuple]) -> dict[tuple[str, str], dic
             outcome: {
                 "fair_prob": fair[outcome],
                 "closing_odds": prices[outcome],
-                "closing_captured_at": meta_by_market[key][outcome],
+                "closing_last_update": meta_by_market[key][outcome],
             }
             for outcome in prices
         }
@@ -84,6 +84,8 @@ def build_clv_rows(
 
         commence, captured, soft_odds = s[_S_COMMENCE], s[_S_CAPTURED], s[_S_ODDS]
         hours_to_commence = (commence - captured).total_seconds() / 3600
+        closing_last_update = outcome_fair["closing_last_update"]
+        hours_before_commence = (commence - closing_last_update).total_seconds() / 3600
         fair_prob = outcome_fair["fair_prob"]
         rows.append(
             {
@@ -99,7 +101,8 @@ def build_clv_rows(
                 "hours_to_commence": hours_to_commence,
                 "soft_odds": soft_odds,
                 "pinnacle_closing_odds": outcome_fair["closing_odds"],
-                "pinnacle_closing_captured_at": outcome_fair["closing_captured_at"],
+                "pinnacle_closing_last_update": closing_last_update,
+                "hours_before_commence": hours_before_commence,
                 "pinnacle_fair_prob": fair_prob,
                 "clv": clv(soft_odds, fair_prob),
             }
@@ -107,13 +110,23 @@ def build_clv_rows(
     return rows, skipped
 
 
-def build_target_rows(con, target: Target) -> tuple[list[dict], int]:
-    """Orquesta un target: cierre sharp -> devig -> une con snapshots soft -> filas CLV."""
+def build_target_rows(con, target: Target) -> tuple[list[dict], int, list[str]]:
+    """Orquesta un target: cierre sharp -> devig -> une con snapshots soft -> filas CLV.
+
+    Además de las filas y el nº de descartes, devuelve events_without_closing: la lista
+    ordenada y deduplicada de event_ids que tienen snapshots soft pero ningún cierre de
+    Pinnacle para ese mercado (no hay fallback silencioso: se hace visible qué eventos
+    quedan fuera del cálculo de CLV por completo, no solo cuántas filas).
+    """
     fair_by_market = fair_probs_by_market(
         closing_lines(con, target.sport_key, target.sharp_book)
     )
     soft_rows = soft_snapshots(con, target.sport_key, target.soft_books)
-    return build_clv_rows(soft_rows, fair_by_market, target.sport_key)
+    rows, skipped = build_clv_rows(soft_rows, fair_by_market, target.sport_key)
+    events_without_closing = sorted(
+        {s[_S_EVENT] for s in soft_rows if (s[_S_EVENT], s[_S_MARKET]) not in fair_by_market}
+    )
+    return rows, skipped, events_without_closing
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -135,20 +148,29 @@ def main(argv: list[str] | None = None) -> int:
 
     all_rows: list[dict] = []
     total_skipped = 0
+    all_events_without_closing: list[str] = []
     for target in targets:
-        rows, skipped = build_target_rows(con, target)
+        rows, skipped, events_without_closing = build_target_rows(con, target)
         total_skipped += skipped
         all_rows.extend(rows)
+        all_events_without_closing.extend(events_without_closing)
         logger.info(
-            "target=%s filas_clv=%d descartadas_sin_cierre=%d", target.name, len(rows), skipped
+            "target=%s filas_clv=%d descartadas_sin_cierre=%d eventos_sin_cierre=%s",
+            target.name,
+            len(rows),
+            skipped,
+            events_without_closing,
         )
 
     inserted = replace_clv_snapshots(con, all_rows)
     con.close()
     logger.info(
-        "clv_snapshots reconstruida: %d filas totales, %d descartadas por falta de cierre",
+        "clv_snapshots reconstruida: %d filas totales, %d descartadas por falta de cierre, "
+        "%d eventos sin ningún cierre válido: %s",
         inserted,
         total_skipped,
+        len(all_events_without_closing),
+        all_events_without_closing,
     )
     return 0
 
