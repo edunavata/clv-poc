@@ -107,6 +107,35 @@ def test_capture_jobs_have_misfire_grace_time(scheduler):
         )
 
 
+def test_close_kickoffs_do_not_drop_closing_burst(scheduler):
+    """Bug 3: dedup greedy es ciego al rol. Con kickoffs a pocos minutos (Mundial:
+    21:00, 21:03), la ráfaga de cierre de un evento puede caer <240s de la del
+    vecino y perderse. La ráfaga de cierre NUNCA debe adelgazarse."""
+    target = _target("wc", "soccer_fifa_world_cup")
+    config = _config([target])
+
+    base = datetime.now(UTC) + timedelta(hours=3)
+    event_a = {"id": "a", "commence_time": base.isoformat().replace("+00:00", "Z")}
+    event_b = {
+        "id": "b",
+        "commence_time": (base + timedelta(minutes=3)).isoformat().replace("+00:00", "Z"),
+    }
+    client = FakeClient(events_by_sport={"soccer_fifa_world_cup": [event_a, event_b]})
+
+    daemon.schedule_captures(scheduler, config, client=client)
+
+    scheduled = {j.trigger.run_date for j in scheduler.get_jobs() if j.id.startswith("capture_wc_")}
+
+    expected_closing = {
+        base - timedelta(minutes=6),
+        base - timedelta(minutes=2),
+        base + timedelta(minutes=3) - timedelta(minutes=6),
+        base + timedelta(minutes=3) - timedelta(minutes=2),
+    }
+    missing = expected_closing - scheduled
+    assert not missing, f"ráfaga de cierre perdida por dedup: {missing}"
+
+
 def test_partial_failure_isolates_targets(scheduler):
     """Discovery falla en un target pero no en otro: cada uno se resuelve por separado."""
     good = _target("good", "sport_good")

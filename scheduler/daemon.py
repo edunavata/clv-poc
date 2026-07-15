@@ -102,7 +102,8 @@ def schedule_captures(
             if job.id.startswith(f"capture_{target.name}_"):
                 scheduler.remove_job(job.id)
 
-        poll_times = set()
+        closing_times = set()
+        trajectory_times = set()
         for event in events:
             # commence_time viene en formato ISO con 'Z'
             commence = datetime.fromisoformat(event["commence_time"].replace("Z", "+00:00"))
@@ -111,21 +112,25 @@ def schedule_captures(
             for h in TRAJECTORY_HOURS:
                 t = commence - timedelta(hours=h)
                 if t > now:
-                    poll_times.add(t)
+                    trajectory_times.add(t)
 
             # R4, R5, R9: Ráfaga de cierre
             for m in CLOSE_BURST_MINUTES:
                 t = commence - timedelta(minutes=m)
                 if t > now:
-                    poll_times.add(t)
+                    closing_times.add(t)
 
-        # R7: Deduplicación por sport_key y ventana temporal
-        # Ordenamos y mantenemos llamadas con al menos 4 minutos de diferencia
-        sorted_times = sorted(list(poll_times))
-        filtered_times = []
-        for t in sorted_times:
-            if not filtered_times or (t - filtered_times[-1]).total_seconds() >= 240:
+        # R7: Deduplicación por sport_key y ventana temporal. La ráfaga de cierre
+        # NUNCA se adelgaza -- con kickoffs apiñados (Mundial: 21:00, 21:03...) un
+        # filtro ciego al rol puede tirar el -2min de un evento a favor del -6min
+        # del vecino, degradando la cercanía al pitido en silencio. Solo la
+        # trayectoria se adelgaza, y contra cualquier tiempo ya aceptado
+        # (cierre o trayectoria) con al menos 4 minutos de diferencia.
+        filtered_times = sorted(closing_times)
+        for t in sorted(trajectory_times):
+            if all(abs((t - accepted).total_seconds()) >= 240 for accepted in filtered_times):
                 filtered_times.append(t)
+        filtered_times.sort()
 
         for i, t in enumerate(filtered_times):
             job_id = f"capture_{target.name}_{i}_{t.timestamp()}"
