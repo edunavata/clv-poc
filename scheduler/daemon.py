@@ -49,7 +49,6 @@ logger = logging.getLogger(__name__)
 
 # Configuración de captura
 DISCOVERY_INTERVAL_HOURS = 12
-TRAJECTORY_HOURS = [48, 24, 12, 6, 3, 1]
 CLOSE_BURST_MINUTES = [6, 2]  # Ráfaga antes del inicio (R5, R9)
 
 
@@ -109,22 +108,32 @@ def schedule_captures(
                 scheduler.remove_job(job.id)
 
         closing_times = set()
-        trajectory_times = set()
+        max_commence = None
         for event in events:
             # commence_time viene en formato ISO con 'Z'
             commence = datetime.fromisoformat(event["commence_time"].replace("Z", "+00:00"))
-
-            # R6: Trayectoria
-            for h in TRAJECTORY_HOURS:
-                t = commence - timedelta(hours=h)
-                if t > now:
-                    trajectory_times.add(t)
+            if max_commence is None or commence > max_commence:
+                max_commence = commence
 
             # R4, R5, R9: Ráfaga de cierre
             for m in CLOSE_BURST_MINUTES:
                 t = commence - timedelta(minutes=m)
                 if t > now:
                     closing_times.add(t)
+
+        # R1: la trayectoria es propiedad del tablero (sport_key), no del evento --
+        # un solo poll cosecha todos los eventos próximos a la vez. Cadencia rala,
+        # global, con el intervalo propio del target. Acotada al próximo ciclo de
+        # discovery: no tiene sentido programar más lejos porque discovery_job
+        # reconstruye la agenda entera antes de llegar ahí.
+        trajectory_times = set()
+        if max_commence is not None:
+            horizon = min(max_commence, now + timedelta(hours=DISCOVERY_INTERVAL_HOURS))
+            interval = timedelta(hours=target.poll_interval_hours)
+            t = now + interval
+            while t < horizon:
+                trajectory_times.add(t)
+                t += interval
 
         # R7: Deduplicación por sport_key y ventana temporal. La ráfaga de cierre
         # NUNCA se adelgaza -- con kickoffs apiñados (Mundial: 21:00, 21:03...) un

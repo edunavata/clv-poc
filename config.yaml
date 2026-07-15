@@ -21,7 +21,7 @@ targets:
       - betvictor
       - winamax_fr
       - marathonbet
-    poll_interval_hours: 3   # documental; la cadencia real la fija crontab
+    poll_interval_hours: 3   # cadencia global de trayectoria del daemon (por sport_key)
 
   - name: mls_2026
     active: true

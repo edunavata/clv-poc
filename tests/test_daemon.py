@@ -162,6 +162,88 @@ def test_closing_jobs_flagged_so_quota_floor_does_not_block_them(scheduler):
             assert is_closing_arg is False, f"job de trayectoria {job.id} marcado is_closing"
 
 
+def _dispersed_events(sport_key, hours_ahead_list):
+    return [
+        {
+            "id": f"evt{i}",
+            "commence_time": (datetime.now(UTC) + timedelta(hours=h)).isoformat().replace(
+                "+00:00", "Z"
+            ),
+        }
+        for i, h in enumerate(hours_ahead_list)
+    ]
+
+
+def _trajectory_run_dates(sched, target_name):
+    jobs = [j for j in sched.get_jobs() if j.id.startswith(f"capture_{target_name}_")]
+    return sorted(j.trigger.run_date for j in jobs if j.args[3] is False)
+
+
+def test_trajectory_count_independent_of_dispersed_event_count(scheduler):
+    """R1/AC1: trayectoria es cadencia de tablero, no por evento. Con eventos
+    dispersos (sin coincidencias de horario, como MLS) el número de capturas de
+    trayectoria no debe crecer con el número de eventos."""
+    target = _target("mls", "soccer_usa_mls")
+    config = _config([target])
+
+    few = _dispersed_events("soccer_usa_mls", [5, 15, 25])
+    many = _dispersed_events("soccer_usa_mls", [5, 15, 25, 35, 45, 55, 65, 75, 85, 95])
+
+    client_few = FakeClient(events_by_sport={"soccer_usa_mls": few})
+    daemon.schedule_captures(scheduler, config, client=client_few)
+    count_few = len(_trajectory_run_dates(scheduler, "mls"))
+
+    client_many = FakeClient(events_by_sport={"soccer_usa_mls": many})
+    daemon.schedule_captures(scheduler, config, client=client_many)
+    count_many = len(_trajectory_run_dates(scheduler, "mls"))
+
+    assert count_few == count_many, (
+        f"trayectoria escala con nº de eventos: {count_few} eventos=3 vs "
+        f"{count_many} eventos=10"
+    )
+    assert 0 < count_few <= 4, f"nº de capturas de trayectoria fuera de rango: {count_few}"
+
+
+def test_trajectory_cadence_matches_target_poll_interval(scheduler):
+    """R1: la cadencia de trayectoria usa target.poll_interval_hours, no una
+    lista fija de offsets relativos al evento."""
+    target = _target("mls", "soccer_usa_mls")
+    config = _config([target])
+    events = _dispersed_events("soccer_usa_mls", [50])
+    client = FakeClient(events_by_sport={"soccer_usa_mls": events})
+
+    daemon.schedule_captures(scheduler, config, client=client)
+    trajectory_dates = _trajectory_run_dates(scheduler, "mls")
+
+    assert len(trajectory_dates) >= 2, "no hay suficientes puntos para medir cadencia"
+    for a, b in zip(trajectory_dates, trajectory_dates[1:]):
+        gap_hours = (b - a).total_seconds() / 3600
+        assert abs(gap_hours - target.poll_interval_hours) < 0.01, (
+            f"cadencia {gap_hours}h no coincide con poll_interval_hours="
+            f"{target.poll_interval_hours}"
+        )
+
+
+def test_trajectory_horizon_capped_by_discovery_interval(scheduler):
+    """R4: aunque el evento esté muy lejos en el futuro, la trayectoria no se
+    programa más allá del próximo ciclo de discovery (que la reconstruirá)."""
+    target = _target("mls", "soccer_usa_mls")
+    config = _config([target])
+    events = _dispersed_events("soccer_usa_mls", [24 * 30])  # evento a 30 días
+    client = FakeClient(events_by_sport={"soccer_usa_mls": events})
+
+    now = datetime.now(UTC)
+    daemon.schedule_captures(scheduler, config, client=client)
+    trajectory_dates = _trajectory_run_dates(scheduler, "mls")
+
+    assert trajectory_dates, "no se programó ninguna captura de trayectoria"
+    horizon = now + timedelta(hours=daemon.DISCOVERY_INTERVAL_HOURS)
+    assert max(trajectory_dates) < horizon, (
+        f"trayectoria programada más allá del horizonte de discovery: "
+        f"{max(trajectory_dates)} >= {horizon}"
+    )
+
+
 def test_partial_failure_isolates_targets(scheduler):
     """Discovery falla en un target pero no en otro: cada uno se resuelve por separado."""
     good = _target("good", "sport_good")
