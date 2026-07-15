@@ -101,6 +101,12 @@ def build_clv_rows(
         # de cierre del demonio sondea a 6/2 min del pitido y nunca se adelgaza
         # (scheduler/daemon.py), así que un cierre real siempre cae muy por debajo de
         # este umbral. 15 min da margen sobre eso sin aceptar un sondeo lejano como cierre.
+        #
+        # INVARIANTE (acopla con scheduler/daemon.py): este umbral debe mantenerse
+        # >= poll de cierre más temprano (CLOSE_BURST_MINUTES) + misfire_grace_time
+        # máximo. Hoy: 6min + 90s ~= 7.5min << 15min, margen amplio. Si algún día se
+        # adelanta el primer poll de la ráfaga o se sube la gracia, revisar este
+        # umbral -- si no, un cierre real puede empezar a salir inválido.
         is_valid_closing_benchmark = hours_before_commence <= 0.25
 
         # R14: Distinguir rol del snapshot (trayectoria vs benchmark de cierre)
