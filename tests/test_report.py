@@ -236,6 +236,36 @@ def test_capture_far_from_commence_invalid_even_with_matching_last_update(tmp_pa
     assert rows[0]["clv"] is None
 
 
+def test_validity_threshold_edge_at_15_minutes(tmp_path):
+    """Clava el corte del umbral (report.py: <= 0.25h). 14min debe ser válido,
+    16min no -- si un refactor desplaza el umbral, este test lo detecta."""
+    con14 = get_connection(tmp_path / "at14.duckdb")
+    insert_snapshot_rows(
+        con14,
+        [
+            _row(COMMENCE - timedelta(minutes=14), "pinnacle", 1.80, "Team A"),
+            _row(COMMENCE - timedelta(minutes=14), "pinnacle", 2.05, "Team B"),
+            _row(COMMENCE - timedelta(minutes=14), "williamhill", 2.10, "Team A"),
+        ],
+    )
+    rows14, _, _ = build_target_rows(con14, TARGET)
+    assert rows14[0]["is_valid_closing_benchmark"] is True
+    assert rows14[0]["clv"] is not None
+
+    con16 = get_connection(tmp_path / "at16.duckdb")
+    insert_snapshot_rows(
+        con16,
+        [
+            _row(COMMENCE - timedelta(minutes=16), "pinnacle", 1.80, "Team A"),
+            _row(COMMENCE - timedelta(minutes=16), "pinnacle", 2.05, "Team B"),
+            _row(COMMENCE - timedelta(minutes=16), "williamhill", 2.10, "Team A"),
+        ],
+    )
+    rows16, _, _ = build_target_rows(con16, TARGET)
+    assert rows16[0]["is_valid_closing_benchmark"] is False
+    assert rows16[0]["clv"] is None
+
+
 def test_snapshot_role(tmp_path):
     con = get_connection(tmp_path / "odds.duckdb")
     insert_snapshot_rows(
