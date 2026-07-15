@@ -86,9 +86,16 @@ VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 """
 
 
-def get_connection(db_path: str | Path) -> duckdb.DuckDBPyConnection:
-    """Abre (o crea) la base DuckDB en db_path y aplica el esquema (idempotente)."""
+def get_connection(db_path: str | Path, read_only: bool = False) -> duckdb.DuckDBPyConnection:
+    """Abre (o crea) la base DuckDB en db_path y aplica el esquema (idempotente).
+
+    read_only=True abre sin aplicar SCHEMA (requiere escritura) y permite lectura
+    concurrente con el daemon, que abre/cierra su conexión por cada poll en vez de
+    mantenerla abierta.
+    """
     db_path = Path(db_path)
+    if read_only:
+        return duckdb.connect(str(db_path), read_only=True)
     db_path.parent.mkdir(parents=True, exist_ok=True)
     con = duckdb.connect(str(db_path))
     con.execute(SCHEMA)
