@@ -136,6 +136,32 @@ def test_close_kickoffs_do_not_drop_closing_burst(scheduler):
     assert not missing, f"ráfaga de cierre perdida por dedup: {missing}"
 
 
+def test_closing_jobs_flagged_so_quota_floor_does_not_block_them(scheduler):
+    """El suelo de créditos (capture_target's is_closing) solo debe cortar
+    trayectoria. El daemon debe marcar cada job con su rol real."""
+    target = _target("wc", "soccer_fifa_world_cup")
+    config = _config([target])
+    commence = datetime.now(UTC) + timedelta(hours=2)
+    event = {"id": "evt1", "commence_time": commence.isoformat().replace("+00:00", "Z")}
+    client = FakeClient(events_by_sport={"soccer_fifa_world_cup": [event]})
+
+    daemon.schedule_captures(scheduler, config, client=client)
+
+    jobs = [j for j in scheduler.get_jobs() if j.id.startswith("capture_wc_")]
+    assert jobs, "no se programó ningún job"
+
+    closing_run_dates = {
+        commence - timedelta(minutes=6),
+        commence - timedelta(minutes=2),
+    }
+    for job in jobs:
+        is_closing_arg = job.args[3]
+        if job.trigger.run_date in closing_run_dates:
+            assert is_closing_arg is True, f"job de cierre {job.id} no marcado is_closing"
+        else:
+            assert is_closing_arg is False, f"job de trayectoria {job.id} marcado is_closing"
+
+
 def test_partial_failure_isolates_targets(scheduler):
     """Discovery falla en un target pero no en otro: cada uno se resuelve por separado."""
     good = _target("good", "sport_good")

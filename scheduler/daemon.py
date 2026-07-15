@@ -57,7 +57,7 @@ def discover_events(client: OddsApiClient, sport_key: str) -> list[dict]:
         return []
 
 
-def run_capture_job(target_name: str, db_path: str, min_credits: int):
+def run_capture_job(target_name: str, db_path: str, min_credits: int, is_closing: bool = False):
     # Aislar imports e instanciación para el worker del job
     from client.odds_api import OddsApiClient
     from config import load_config
@@ -70,7 +70,7 @@ def run_capture_job(target_name: str, db_path: str, min_credits: int):
     client = OddsApiClient()
     con = get_connection(db_path)
     captured_at = datetime.now(UTC)
-    result = capture_target(client, con, targets[0], min_credits, captured_at)
+    result = capture_target(client, con, targets[0], min_credits, captured_at, is_closing=is_closing)
     con.close()
 
     if not result.ok:
@@ -134,10 +134,11 @@ def schedule_captures(
 
         for i, t in enumerate(filtered_times):
             job_id = f"capture_{target.name}_{i}_{t.timestamp()}"
+            is_closing = t in closing_times
             scheduler.add_job(
                 run_capture_job,
                 trigger=DateTrigger(run_date=t),
-                args=[target.name, config.db_path, config.min_remaining_credits],
+                args=[target.name, config.db_path, config.min_remaining_credits, is_closing],
                 id=job_id,
                 replace_existing=True,
                 # Default de APScheduler es 1s: un retraso mínimo (hilo ocupado, sleep

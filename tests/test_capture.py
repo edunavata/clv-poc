@@ -77,6 +77,35 @@ def test_capture_target_aborts_when_quota_margin_not_respected(target, tmp_path,
     assert "cuota insuficiente" in result.reason
 
 
+def test_capture_target_bypasses_quota_margin_for_closing(target, tmp_path, monkeypatch):
+    """El suelo de créditos protege trayectoria, nunca cierre -- perder el cierre
+    por quedarse sin margen es la pérdida más cara del sistema."""
+    monkeypatch.setenv("ODDS_API_KEY", "test-key")
+    client = OddsApiClient()
+    monkeypatch.setattr(
+        client, "get_usage", lambda: {"remaining": "10", "used": "490", "last": "0"}
+    )
+
+    def fake_get_odds(*args, **kwargs):
+        if kwargs.get("dry_run") is False:
+            return {"data": [], "estimated_cost": 1, "requests_remaining": "9"}
+        return {"dry_run": True, "estimated_cost": 1, "url": "", "params": {}}
+
+    monkeypatch.setattr(client, "get_odds", fake_get_odds)
+    con = get_connection(tmp_path / "odds.duckdb")
+
+    result = capture_target(
+        client,
+        con,
+        target,
+        min_remaining_credits=20,
+        captured_at=datetime.now(UTC),
+        is_closing=True,
+    )
+
+    assert result.ok is True
+
+
 def test_capture_target_isolates_api_failure(target, tmp_path, monkeypatch):
     monkeypatch.setenv("ODDS_API_KEY", "test-key")
     client = OddsApiClient()

@@ -61,7 +61,12 @@ def parse_bookmaker_rows(event: dict, sport_key: str, captured_at: datetime) -> 
 
 
 def capture_target(
-    client: OddsApiClient, con, target: Target, min_remaining_credits: int, captured_at: datetime
+    client: OddsApiClient,
+    con,
+    target: Target,
+    min_remaining_credits: int,
+    captured_at: datetime,
+    is_closing: bool = False,
 ) -> CaptureResult:
     estimate = client.get_odds(
         target.sport_key, markets=target.markets, bookmakers=target.bookmakers
@@ -73,7 +78,10 @@ def capture_target(
     if remaining is None:
         return CaptureResult(target.name, ok=False, reason="no se pudo leer la cuota restante")
 
-    if int(remaining) - estimated_cost < min_remaining_credits:
+    # El suelo de créditos protege la trayectoria, nunca el cierre: perder el cierre
+    # por quedarse sin margen es la pérdida más cara del sistema (degradación con
+    # gracia -- corta trayectoria antes que arriesgar el dato de mayor valor).
+    if not is_closing and int(remaining) - estimated_cost < min_remaining_credits:
         return CaptureResult(
             target.name,
             ok=False,
