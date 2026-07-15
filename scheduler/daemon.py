@@ -2,6 +2,12 @@
 
 Descubre eventos periódicamente y programa capturas (trayectoria + ráfaga de cierre).
 Resiliente a reinicios: al arrancar lee la API y programa lo necesario.
+
+Sin backfill, a propósito: si el demonio cae durante una ráfaga de cierre, ese cierre
+no se recupera al reiniciar. Reconstruirlo a posteriori (vía endpoint histórico de
+pago) sería fabricar un dato que no se capturó en su momento -- justo lo que este
+proyecto no acepta. Un cierre ausente se queda ausente y marcado como hueco, no
+rellenado.
 """
 
 import logging
