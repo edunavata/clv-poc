@@ -86,7 +86,17 @@ def build_clv_rows(
         hours_to_commence = (commence - captured).total_seconds() / 3600
         closing_last_update = outcome_fair["closing_last_update"]
         hours_before_commence = (commence - closing_last_update).total_seconds() / 3600
+
+        # R12, R13, R15: Validamos el benchmark. Asumimos max 2 horas de ranciedad aceptable.
+        # En la práctica, el demonio asegura capturas a minutos del inicio.
+        is_valid_closing_benchmark = hours_before_commence <= 2.0
+
+        # R14: Distinguir rol del snapshot (trayectoria vs benchmark de cierre)
+        snapshot_role = "closing" if hours_to_commence <= 0.5 else "trajectory"
+
         fair_prob = outcome_fair["fair_prob"]
+        clv_val = clv(soft_odds, fair_prob) if is_valid_closing_benchmark else None
+
         rows.append(
             {
                 "sport_key": sport_key,
@@ -104,7 +114,9 @@ def build_clv_rows(
                 "pinnacle_closing_last_update": closing_last_update,
                 "hours_before_commence": hours_before_commence,
                 "pinnacle_fair_prob": fair_prob,
-                "clv": clv(soft_odds, fair_prob),
+                "clv": clv_val,
+                "is_valid_closing_benchmark": is_valid_closing_benchmark,
+                "snapshot_role": snapshot_role,
             }
         )
     return rows, skipped
@@ -118,9 +130,7 @@ def build_target_rows(con, target: Target) -> tuple[list[dict], int, list[str]]:
     Pinnacle para ese mercado (no hay fallback silencioso: se hace visible qué eventos
     quedan fuera del cálculo de CLV por completo, no solo cuántas filas).
     """
-    fair_by_market = fair_probs_by_market(
-        closing_lines(con, target.sport_key, target.sharp_book)
-    )
+    fair_by_market = fair_probs_by_market(closing_lines(con, target.sport_key, target.sharp_book))
     soft_rows = soft_snapshots(con, target.sport_key, target.soft_books)
     rows, skipped = build_clv_rows(soft_rows, fair_by_market, target.sport_key)
     events_without_closing = sorted(

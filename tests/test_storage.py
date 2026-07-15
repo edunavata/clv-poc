@@ -78,5 +78,7 @@ def test_closing_lines_selects_by_api_last_update_not_captured_at(tmp_path):
 
     assert len(result) == 1
     row = result[0]
-    assert row[6] == 2.00  # closing_odds: gana el api_last_update más reciente (-6h), no el sondeo más tardío
+    assert (
+        row[6] == 2.00
+    )  # closing_odds: gana el api_last_update más reciente (-6h), no el sondeo más tardío
     assert row[7] == COMMENCE - timedelta(hours=6)  # closing_last_update

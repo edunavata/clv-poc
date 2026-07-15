@@ -161,3 +161,40 @@ def test_post_commence_soft_snapshots_excluded(tmp_path):
 
     assert len(rows) == 1
     assert rows[0]["hours_to_commence"] == pytest.approx(2.0)
+
+
+def test_rancid_closing_benchmark_nullifies_clv(tmp_path):
+    con = get_connection(tmp_path / "odds.duckdb")
+    insert_snapshot_rows(
+        con,
+        [
+            _row(COMMENCE - timedelta(hours=5), "pinnacle", 1.80, "Team A"),
+            _row(COMMENCE - timedelta(hours=5), "pinnacle", 2.05, "Team B"),
+            _row(COMMENCE - timedelta(hours=2), "williamhill", 2.10, "Team A"),
+        ],
+    )
+
+    rows, _, _ = build_target_rows(con, TARGET)
+    assert len(rows) == 1
+    assert rows[0]["hours_before_commence"] == pytest.approx(5.0)
+    assert rows[0]["is_valid_closing_benchmark"] is False
+    assert rows[0]["clv"] is None
+
+
+def test_snapshot_role(tmp_path):
+    con = get_connection(tmp_path / "odds.duckdb")
+    insert_snapshot_rows(
+        con,
+        [
+            _row(COMMENCE - timedelta(hours=1), "pinnacle", 1.80, "Team A"),
+            _row(COMMENCE - timedelta(hours=1), "pinnacle", 2.05, "Team B"),
+            _row(COMMENCE - timedelta(hours=5), "williamhill", 2.10, "Team A"),
+            _row(COMMENCE - timedelta(minutes=10), "williamhill", 1.95, "Team A"),
+        ],
+    )
+    rows, _, _ = build_target_rows(con, TARGET)
+    assert len(rows) == 2
+    r_traj = next(r for r in rows if r["hours_to_commence"] > 1.0)
+    r_close = next(r for r in rows if r["hours_to_commence"] < 0.5)
+    assert r_traj["snapshot_role"] == "trajectory"
+    assert r_close["snapshot_role"] == "closing"
