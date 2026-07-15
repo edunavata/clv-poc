@@ -29,8 +29,8 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s")
 logger = logging.getLogger(__name__)
 
 # Índices de columna de closing_lines(): event_id, market, outcome, home, away,
-# commence, closing_odds, closing_last_update.
-_C_EVENT, _C_MARKET, _C_OUTCOME, _C_ODDS, _C_LAST_UPDATE = 0, 1, 2, 6, 7
+# commence, closing_odds, closing_last_update, closing_captured_at.
+_C_EVENT, _C_MARKET, _C_OUTCOME, _C_ODDS, _C_LAST_UPDATE, _C_CAPTURED_AT = 0, 1, 2, 6, 7, 8
 # Índices de soft_snapshots(): event_id, market, outcome, home, away, commence,
 # book, captured_at, odds.
 _S_EVENT, _S_MARKET, _S_OUTCOME, _S_HOME, _S_AWAY = 0, 1, 2, 3, 4
@@ -49,7 +49,10 @@ def fair_probs_by_market(closing_rows: list[tuple]) -> dict[tuple[str, str], dic
     for row in closing_rows:
         key = (row[_C_EVENT], row[_C_MARKET])
         odds_by_market.setdefault(key, {})[row[_C_OUTCOME]] = row[_C_ODDS]
-        meta_by_market.setdefault(key, {})[row[_C_OUTCOME]] = row[_C_LAST_UPDATE]
+        meta_by_market.setdefault(key, {})[row[_C_OUTCOME]] = (
+            row[_C_LAST_UPDATE],
+            row[_C_CAPTURED_AT],
+        )
 
     result: dict[tuple[str, str], dict] = {}
     for key, prices in odds_by_market.items():
@@ -58,7 +61,8 @@ def fair_probs_by_market(closing_rows: list[tuple]) -> dict[tuple[str, str], dic
             outcome: {
                 "fair_prob": fair[outcome],
                 "closing_odds": prices[outcome],
-                "closing_last_update": meta_by_market[key][outcome],
+                "closing_last_update": meta_by_market[key][outcome][0],
+                "closing_captured_at": meta_by_market[key][outcome][1],
             }
             for outcome in prices
         }
@@ -85,11 +89,19 @@ def build_clv_rows(
         commence, captured, soft_odds = s[_S_COMMENCE], s[_S_CAPTURED], s[_S_ODDS]
         hours_to_commence = (commence - captured).total_seconds() / 3600
         closing_last_update = outcome_fair["closing_last_update"]
-        hours_before_commence = (commence - closing_last_update).total_seconds() / 3600
+        closing_captured_at = outcome_fair["closing_captured_at"]
+        # El eje de validez es CUÁNDO NOSOTROS sondeamos el cierre (closing_captured_at),
+        # no cuándo Pinnacle actualizó su precio (closing_last_update). Un mercado
+        # tranquilo (precio sin mover en 30min) capturado a 2min del pitido sigue siendo
+        # un cierre válido -- closing_last_update solo audita la frescura del PRECIO,
+        # no decide validez.
+        hours_before_commence = (commence - closing_captured_at).total_seconds() / 3600
 
-        # R12, R13, R15: Validamos el benchmark. Asumimos max 2 horas de ranciedad aceptable.
-        # En la práctica, el demonio asegura capturas a minutos del inicio.
-        is_valid_closing_benchmark = hours_before_commence <= 2.0
+        # R12, R13, R15: Validamos el benchmark. Umbral en minutos, no horas: la ráfaga
+        # de cierre del demonio sondea a 6/2 min del pitido y nunca se adelgaza
+        # (scheduler/daemon.py), así que un cierre real siempre cae muy por debajo de
+        # este umbral. 15 min da margen sobre eso sin aceptar un sondeo lejano como cierre.
+        is_valid_closing_benchmark = hours_before_commence <= 0.25
 
         # R14: Distinguir rol del snapshot (trayectoria vs benchmark de cierre)
         snapshot_role = "closing" if hours_to_commence <= 0.5 else "trajectory"
