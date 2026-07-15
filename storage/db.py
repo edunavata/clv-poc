@@ -69,7 +69,9 @@ CREATE OR REPLACE TABLE clv_snapshots (
     pinnacle_closing_last_update TIMESTAMP NOT NULL,
     hours_before_commence        DOUBLE NOT NULL,
     pinnacle_fair_prob           DOUBLE NOT NULL,
-    clv                          DOUBLE NOT NULL
+    clv                          DOUBLE,
+    is_valid_closing_benchmark   BOOLEAN NOT NULL,
+    snapshot_role                VARCHAR NOT NULL
 )
 """
 
@@ -78,8 +80,8 @@ INSERT INTO clv_snapshots
     (sport_key, event_id, home_team, away_team, market, outcome, soft_book,
      commence_time, captured_at, hours_to_commence, soft_odds,
      pinnacle_closing_odds, pinnacle_closing_last_update, hours_before_commence,
-     pinnacle_fair_prob, clv)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+     pinnacle_fair_prob, clv, is_valid_closing_benchmark, snapshot_role)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 """
 
 
@@ -154,6 +156,8 @@ def replace_clv_snapshots(con: duckdb.DuckDBPyConnection, rows: list[dict]) -> i
                 row["hours_before_commence"],
                 row["pinnacle_fair_prob"],
                 row["clv"],
+                row["is_valid_closing_benchmark"],
+                row["snapshot_role"],
             ],
         )
     return len(rows)
