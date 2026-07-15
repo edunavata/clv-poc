@@ -9,6 +9,13 @@ todo el archivo en cada interacción) en vez de cachearse, para que el
 dashboard siempre lea el estado más reciente que vaya escribiendo el daemon.
 """
 
+import sys
+from pathlib import Path
+
+# `streamlit run` ejecuta el binario del entry point directamente (no `python -m`),
+# así que no añade la raíz del repo a sys.path como sí hace `-m scheduler.capture`.
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
 import pandas as pd
 import streamlit as st
 
@@ -96,6 +103,6 @@ if soft_book_filter:
     filtered = filtered[filtered["soft_book"].isin(soft_book_filter)]
 if role_filter:
     filtered = filtered[filtered["snapshot_role"].isin(role_filter)]
-st.dataframe(filtered, use_container_width=True)
+st.dataframe(filtered, width="stretch")
 
 con.close()
