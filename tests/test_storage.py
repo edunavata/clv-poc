@@ -82,3 +82,21 @@ def test_closing_lines_selects_by_api_last_update_not_captured_at(tmp_path):
         row[6] == 2.00
     )  # closing_odds: gana el api_last_update más reciente (-6h), no el sondeo más tardío
     assert row[7] == COMMENCE - timedelta(hours=6)  # closing_last_update
+
+
+def test_closing_lines_exposes_captured_at_of_winning_row(tmp_path):
+    """La validez del benchmark (fuera de esta función) necesita saber CUÁNDO
+    sondeamos nosotros, no solo cuándo Pinnacle actualizó su precio."""
+    con = get_connection(tmp_path / "odds.duckdb")
+
+    rows = [
+        _row_stale(COMMENCE - timedelta(minutes=2), COMMENCE - timedelta(minutes=30), "pinnacle", 1.85),
+    ]
+    insert_snapshot_rows(con, rows)
+
+    result = closing_lines(con, "soccer_fifa_world_cup", "pinnacle")
+
+    assert len(result) == 1
+    row = result[0]
+    assert row[7] == COMMENCE - timedelta(minutes=30)  # closing_last_update (Pinnacle)
+    assert row[8] == COMMENCE - timedelta(minutes=2)  # closing_captured_at (nuestro sondeo)

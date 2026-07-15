@@ -25,8 +25,9 @@ CREATE TABLE IF NOT EXISTS snapshots (
 
 CLOSING_LINES_QUERY = """
 SELECT event_id, market, outcome, home_team, away_team, commence_time,
-       arg_max(odds, api_last_update) AS closing_odds,
-       max(api_last_update)           AS closing_last_update
+       arg_max(odds, api_last_update)        AS closing_odds,
+       max(api_last_update)                  AS closing_last_update,
+       arg_max(captured_at, api_last_update)  AS closing_captured_at
 FROM snapshots
 WHERE sport_key = ? AND book = ? AND api_last_update < commence_time
 GROUP BY event_id, market, outcome, home_team, away_team, commence_time

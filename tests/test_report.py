@@ -40,9 +40,10 @@ def _seed_two_outcome_market(con):
     soft de Team A a distinta antelación, con el precio soft cayendo hacia el cierre.
     """
     rows = [
-        # Cierre sharp: dos outcomes -> devig sobre mercado completo.
-        _row(COMMENCE - timedelta(hours=1), "pinnacle", 1.80, "Team A"),
-        _row(COMMENCE - timedelta(hours=1), "pinnacle", 2.05, "Team B"),
+        # Cierre sharp: dos outcomes -> devig sobre mercado completo. Capturado a
+        # 2min del pitido -- dentro del umbral de validez (<=15min).
+        _row(COMMENCE - timedelta(minutes=2), "pinnacle", 1.80, "Team A"),
+        _row(COMMENCE - timedelta(minutes=2), "pinnacle", 2.05, "Team B"),
         # Snapshots soft (williamhill) de Team A: 7h/4h/1h antes, precio decreciente.
         _row(COMMENCE - timedelta(hours=7), "williamhill", 2.10, "Team A"),
         _row(COMMENCE - timedelta(hours=4), "williamhill", 1.95, "Team A"),
@@ -72,14 +73,14 @@ def test_hours_to_commence_computed_per_snapshot(tmp_path):
     assert hours == pytest.approx([1.0, 4.0, 7.0])
 
 
-def test_hours_before_commence_reflects_pinnacle_last_update(tmp_path):
+def test_hours_before_commence_reflects_our_capture_of_the_close(tmp_path):
     con = get_connection(tmp_path / "odds.duckdb")
-    _seed_two_outcome_market(con)  # cierre sharp con api_last_update = COMMENCE - 1h
+    _seed_two_outcome_market(con)  # cierre sharp sondeado a COMMENCE - 2min
 
     rows, _, _ = build_target_rows(con, TARGET)
 
-    assert all(r["hours_before_commence"] == pytest.approx(1.0) for r in rows)
-    assert all(r["pinnacle_closing_last_update"] == COMMENCE - timedelta(hours=1) for r in rows)
+    assert all(r["hours_before_commence"] == pytest.approx(2 / 60) for r in rows)
+    assert all(r["pinnacle_closing_last_update"] == COMMENCE - timedelta(minutes=2) for r in rows)
 
 
 def test_clv_trajectory_decreases_toward_close(tmp_path):
@@ -179,6 +180,90 @@ def test_rancid_closing_benchmark_nullifies_clv(tmp_path):
     assert rows[0]["hours_before_commence"] == pytest.approx(5.0)
     assert rows[0]["is_valid_closing_benchmark"] is False
     assert rows[0]["clv"] is None
+
+
+def _row_stale(captured_at, api_last_update, book, odds, outcome="Team A"):
+    row = _row(captured_at, book, odds, outcome)
+    row["api_last_update"] = api_last_update
+    return row
+
+
+def test_quiet_market_valid_if_our_capture_is_near_commence(tmp_path):
+    """Eje correcto: validez se mide sobre CUÁNDO sondeamos (captured_at), no sobre
+    cuándo Pinnacle actualizó su precio (api_last_update). Un mercado tranquilo
+    (Pinnacle no mueve línea en 30min) capturado a 2min del pitido SIGUE siendo
+    un cierre válido -- el precio no cambia, pero nuestro sondeo sí fue cerca."""
+    con = get_connection(tmp_path / "odds.duckdb")
+    insert_snapshot_rows(
+        con,
+        [
+            _row_stale(
+                COMMENCE - timedelta(minutes=2), COMMENCE - timedelta(minutes=30), "pinnacle", 1.80, "Team A"
+            ),
+            _row_stale(
+                COMMENCE - timedelta(minutes=2), COMMENCE - timedelta(minutes=30), "pinnacle", 2.05, "Team B"
+            ),
+            _row(COMMENCE - timedelta(minutes=5), "williamhill", 2.10, "Team A"),
+        ],
+    )
+
+    rows, _, _ = build_target_rows(con, TARGET)
+
+    assert len(rows) == 1
+    assert rows[0]["is_valid_closing_benchmark"] is True
+    assert rows[0]["clv"] is not None
+
+
+def test_capture_far_from_commence_invalid_even_with_matching_last_update(tmp_path):
+    """Reproduce el bug real: Pinnacle sondeado a 78min del pitido, api_last_update
+    coincide con nuestro captured_at (mismo instante, market en movimiento). El
+    viejo eje (closing_last_update) lo marcaba válido por error; el nuevo eje
+    (captured_at real) debe rechazarlo."""
+    con = get_connection(tmp_path / "odds.duckdb")
+    insert_snapshot_rows(
+        con,
+        [
+            _row(COMMENCE - timedelta(minutes=78), "pinnacle", 1.80, "Team A"),
+            _row(COMMENCE - timedelta(minutes=78), "pinnacle", 2.05, "Team B"),
+            _row(COMMENCE - timedelta(minutes=80), "williamhill", 2.10, "Team A"),
+        ],
+    )
+
+    rows, _, _ = build_target_rows(con, TARGET)
+
+    assert len(rows) == 1
+    assert rows[0]["is_valid_closing_benchmark"] is False
+    assert rows[0]["clv"] is None
+
+
+def test_validity_threshold_edge_at_15_minutes(tmp_path):
+    """Clava el corte del umbral (report.py: <= 0.25h). 14min debe ser válido,
+    16min no -- si un refactor desplaza el umbral, este test lo detecta."""
+    con14 = get_connection(tmp_path / "at14.duckdb")
+    insert_snapshot_rows(
+        con14,
+        [
+            _row(COMMENCE - timedelta(minutes=14), "pinnacle", 1.80, "Team A"),
+            _row(COMMENCE - timedelta(minutes=14), "pinnacle", 2.05, "Team B"),
+            _row(COMMENCE - timedelta(minutes=14), "williamhill", 2.10, "Team A"),
+        ],
+    )
+    rows14, _, _ = build_target_rows(con14, TARGET)
+    assert rows14[0]["is_valid_closing_benchmark"] is True
+    assert rows14[0]["clv"] is not None
+
+    con16 = get_connection(tmp_path / "at16.duckdb")
+    insert_snapshot_rows(
+        con16,
+        [
+            _row(COMMENCE - timedelta(minutes=16), "pinnacle", 1.80, "Team A"),
+            _row(COMMENCE - timedelta(minutes=16), "pinnacle", 2.05, "Team B"),
+            _row(COMMENCE - timedelta(minutes=16), "williamhill", 2.10, "Team A"),
+        ],
+    )
+    rows16, _, _ = build_target_rows(con16, TARGET)
+    assert rows16[0]["is_valid_closing_benchmark"] is False
+    assert rows16[0]["clv"] is None
 
 
 def test_snapshot_role(tmp_path):

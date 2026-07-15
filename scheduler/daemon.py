@@ -2,6 +2,12 @@
 
 Descubre eventos periódicamente y programa capturas (trayectoria + ráfaga de cierre).
 Resiliente a reinicios: al arrancar lee la API y programa lo necesario.
+
+Sin backfill, a propósito: si el demonio cae durante una ráfaga de cierre, ese cierre
+no se recupera al reiniciar. Reconstruirlo a posteriori (vía endpoint histórico de
+pago) sería fabricar un dato que no se capturó en su momento -- justo lo que este
+proyecto no acepta. Un cierre ausente se queda ausente y marcado como hueco, no
+rellenado.
 """
 
 import logging
@@ -57,7 +63,7 @@ def discover_events(client: OddsApiClient, sport_key: str) -> list[dict]:
         return []
 
 
-def run_capture_job(target_name: str, db_path: str, min_credits: int):
+def run_capture_job(target_name: str, db_path: str, min_credits: int, is_closing: bool = False):
     # Aislar imports e instanciación para el worker del job
     from client.odds_api import OddsApiClient
     from config import load_config
@@ -70,31 +76,40 @@ def run_capture_job(target_name: str, db_path: str, min_credits: int):
     client = OddsApiClient()
     con = get_connection(db_path)
     captured_at = datetime.now(UTC)
-    result = capture_target(client, con, targets[0], min_credits, captured_at)
+    result = capture_target(client, con, targets[0], min_credits, captured_at, is_closing=is_closing)
     con.close()
 
     if not result.ok:
         logger.error("Fallo en job de captura para %s: %s", target_name, result.reason)
 
 
-def schedule_captures(scheduler: BackgroundScheduler, config: AppConfig):
-    client = OddsApiClient()
+def schedule_captures(
+    scheduler: BackgroundScheduler, config: AppConfig, client: OddsApiClient | None = None
+):
+    if client is None:
+        client = OddsApiClient()
     targets = config.active_targets()
     now = datetime.now(UTC)
-
-    # R8: limpiar jobs anteriores del target para evitar duplicados en reprogramación
-    # Solo eliminamos jobs de captura, no el de discovery
-    for job in scheduler.get_jobs():
-        if job.id.startswith("capture_"):
-            scheduler.remove_job(job.id)
 
     total_jobs = 0
     for target in targets:
         events = discover_events(client, target.sport_key)
+        # R8 + resiliencia: un discovery caído NO debe vaciar la agenda. Solo tocamos
+        # los jobs de este target DESPUÉS de saber que podemos reconstruirlos; si falla,
+        # conservamos la agenda previa hasta el próximo tick de discovery.
         if not events:
+            logger.warning(
+                "Discovery sin eventos para %s; conservo agenda previa", target.name
+            )
             continue
 
-        poll_times = set()
+        # Reemplazo atómico por target: borrar jobs viejos SOLO de este target
+        for job in scheduler.get_jobs():
+            if job.id.startswith(f"capture_{target.name}_"):
+                scheduler.remove_job(job.id)
+
+        closing_times = set()
+        trajectory_times = set()
         for event in events:
             # commence_time viene en formato ISO con 'Z'
             commence = datetime.fromisoformat(event["commence_time"].replace("Z", "+00:00"))
@@ -103,30 +118,39 @@ def schedule_captures(scheduler: BackgroundScheduler, config: AppConfig):
             for h in TRAJECTORY_HOURS:
                 t = commence - timedelta(hours=h)
                 if t > now:
-                    poll_times.add(t)
+                    trajectory_times.add(t)
 
             # R4, R5, R9: Ráfaga de cierre
             for m in CLOSE_BURST_MINUTES:
                 t = commence - timedelta(minutes=m)
                 if t > now:
-                    poll_times.add(t)
+                    closing_times.add(t)
 
-        # R7: Deduplicación por sport_key y ventana temporal
-        # Ordenamos y mantenemos llamadas con al menos 4 minutos de diferencia
-        sorted_times = sorted(list(poll_times))
-        filtered_times = []
-        for t in sorted_times:
-            if not filtered_times or (t - filtered_times[-1]).total_seconds() >= 240:
+        # R7: Deduplicación por sport_key y ventana temporal. La ráfaga de cierre
+        # NUNCA se adelgaza -- con kickoffs apiñados (Mundial: 21:00, 21:03...) un
+        # filtro ciego al rol puede tirar el -2min de un evento a favor del -6min
+        # del vecino, degradando la cercanía al pitido en silencio. Solo la
+        # trayectoria se adelgaza, y contra cualquier tiempo ya aceptado
+        # (cierre o trayectoria) con al menos 4 minutos de diferencia.
+        filtered_times = sorted(closing_times)
+        for t in sorted(trajectory_times):
+            if all(abs((t - accepted).total_seconds()) >= 240 for accepted in filtered_times):
                 filtered_times.append(t)
+        filtered_times.sort()
 
         for i, t in enumerate(filtered_times):
             job_id = f"capture_{target.name}_{i}_{t.timestamp()}"
+            is_closing = t in closing_times
             scheduler.add_job(
                 run_capture_job,
                 trigger=DateTrigger(run_date=t),
-                args=[target.name, config.db_path, config.min_remaining_credits],
+                args=[target.name, config.db_path, config.min_remaining_credits, is_closing],
                 id=job_id,
                 replace_existing=True,
+                # Default de APScheduler es 1s: un retraso mínimo (hilo ocupado, sleep
+                # de sistema) descartaría en silencio el poll de cierre, el dato de
+                # mayor valor. 90s cubre eso sin arriesgar capturar in-play.
+                misfire_grace_time=90,
             )
 
         logger.info("Programadas %d capturas para target %s", len(filtered_times), target.name)
