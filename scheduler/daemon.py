@@ -77,22 +77,30 @@ def run_capture_job(target_name: str, db_path: str, min_credits: int):
         logger.error("Fallo en job de captura para %s: %s", target_name, result.reason)
 
 
-def schedule_captures(scheduler: BackgroundScheduler, config: AppConfig):
-    client = OddsApiClient()
+def schedule_captures(
+    scheduler: BackgroundScheduler, config: AppConfig, client: OddsApiClient | None = None
+):
+    if client is None:
+        client = OddsApiClient()
     targets = config.active_targets()
     now = datetime.now(UTC)
-
-    # R8: limpiar jobs anteriores del target para evitar duplicados en reprogramación
-    # Solo eliminamos jobs de captura, no el de discovery
-    for job in scheduler.get_jobs():
-        if job.id.startswith("capture_"):
-            scheduler.remove_job(job.id)
 
     total_jobs = 0
     for target in targets:
         events = discover_events(client, target.sport_key)
+        # R8 + resiliencia: un discovery caído NO debe vaciar la agenda. Solo tocamos
+        # los jobs de este target DESPUÉS de saber que podemos reconstruirlos; si falla,
+        # conservamos la agenda previa hasta el próximo tick de discovery.
         if not events:
+            logger.warning(
+                "Discovery sin eventos para %s; conservo agenda previa", target.name
+            )
             continue
+
+        # Reemplazo atómico por target: borrar jobs viejos SOLO de este target
+        for job in scheduler.get_jobs():
+            if job.id.startswith(f"capture_{target.name}_"):
+                scheduler.remove_job(job.id)
 
         poll_times = set()
         for event in events:
