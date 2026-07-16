@@ -4,6 +4,15 @@ Sistema de detección de edges en apuestas deportivas basado en **Closing Line V
 
 > El proyecto está en fase POC (Edge A): capturar datos reales y verificar si existe CLV positivo consistente. No se ejecutan apuestas reales.
 
+## ⚠️ Disclaimer
+
+**Este proyecto es un ejercicio de investigación personal. No está diseñado para generar beneficio económico ni debe usarse para apostar dinero real.**
+
+- El resultado más probable de este POC es **no encontrar ningún edge explotable**. Detectar CLV positivo consistente en mercados líquidos es extremadamente difícil; la hipótesis puede simplemente ser falsa o insuficiente a esta escala.
+- Incluso si el análisis mostrase CLV positivo, eso **no implica rentabilidad real**: los datos de The Odds API tienen latencia, las cuotas que ve un apostador real incluyen limitaciones de cuenta, y la varianza a corto plazo es enorme.
+- **No se debe usar este código para tomar decisiones de apuesta con dinero real.** El autor no asume ninguna responsabilidad por pérdidas derivadas de un uso distinto al de investigación.
+- Las apuestas deportivas conllevan riesgo de pérdida. Si tienes o crees tener un problema con el juego, busca ayuda en [jugarbien.es](https://www.jugarbien.es) (España) o el servicio equivalente de tu país.
+
 ## Arranque rápido
 
 ```bash
