@@ -9,7 +9,6 @@ Uso:
 """
 
 import sys
-import os
 import argparse
 from collections import defaultdict
 from pathlib import Path
@@ -18,10 +17,10 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-from dotenv import load_dotenv
+from dotenv import load_dotenv  # noqa: E402
 load_dotenv(ROOT / ".env")
 
-from client.odds_api import OddsApiClient, OddsApiError
+from client.odds_api import OddsApiClient, OddsApiError  # noqa: E402
 
 # ── Constantes de color ANSI ───────────────────────────────────────────────
 RESET   = "\033[0m"
