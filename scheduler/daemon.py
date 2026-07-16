@@ -13,7 +13,7 @@ rellenado.
 import logging
 import sys
 import time
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.date import DateTrigger
@@ -21,6 +21,7 @@ from apscheduler.triggers.date import DateTrigger
 from client.odds_api import OddsApiClient
 from config import AppConfig, load_config, load_dotenv
 from scheduler.capture import capture_target
+from scheduler.planning import DISCOVERY_INTERVAL_HOURS, plan_capture_times
 from storage.db import get_connection
 
 import os
@@ -46,10 +47,6 @@ def setup_logging():
 
 
 logger = logging.getLogger(__name__)
-
-# Configuración de captura
-DISCOVERY_INTERVAL_HOURS = 12
-CLOSE_BURST_MINUTES = [6, 2]  # Ráfaga antes del inicio (R5, R9)
 
 
 def discover_events(client: OddsApiClient, sport_key: str) -> list[dict]:
@@ -107,53 +104,16 @@ def schedule_captures(
             if job.id.startswith(f"capture_{target.name}_"):
                 scheduler.remove_job(job.id)
 
-        closing_times = set()
-        max_commence = None
-        for event in events:
-            # commence_time viene en formato ISO con 'Z'
-            commence = datetime.fromisoformat(event["commence_time"].replace("Z", "+00:00"))
-            if max_commence is None or commence > max_commence:
-                max_commence = commence
+        # El algoritmo (ráfaga de cierre + trayectoria + dedup R7) vive en
+        # scheduler.planning como función pura, compartida con la vista previa.
+        planned = plan_capture_times(events, now, target.poll_interval_hours)
 
-            # R4, R5, R9: Ráfaga de cierre
-            for m in CLOSE_BURST_MINUTES:
-                t = commence - timedelta(minutes=m)
-                if t > now:
-                    closing_times.add(t)
-
-        # R1: la trayectoria es propiedad del tablero (sport_key), no del evento --
-        # un solo poll cosecha todos los eventos próximos a la vez. Cadencia rala,
-        # global, con el intervalo propio del target. Acotada al próximo ciclo de
-        # discovery: no tiene sentido programar más lejos porque discovery_job
-        # reconstruye la agenda entera antes de llegar ahí.
-        trajectory_times = set()
-        if max_commence is not None:
-            horizon = min(max_commence, now + timedelta(hours=DISCOVERY_INTERVAL_HOURS))
-            interval = timedelta(hours=target.poll_interval_hours)
-            t = now + interval
-            while t < horizon:
-                trajectory_times.add(t)
-                t += interval
-
-        # R7: Deduplicación por sport_key y ventana temporal. La ráfaga de cierre
-        # NUNCA se adelgaza -- con kickoffs apiñados (Mundial: 21:00, 21:03...) un
-        # filtro ciego al rol puede tirar el -2min de un evento a favor del -6min
-        # del vecino, degradando la cercanía al pitido en silencio. Solo la
-        # trayectoria se adelgaza, y contra cualquier tiempo ya aceptado
-        # (cierre o trayectoria) con al menos 4 minutos de diferencia.
-        filtered_times = sorted(closing_times)
-        for t in sorted(trajectory_times):
-            if all(abs((t - accepted).total_seconds()) >= 240 for accepted in filtered_times):
-                filtered_times.append(t)
-        filtered_times.sort()
-
-        for i, t in enumerate(filtered_times):
-            job_id = f"capture_{target.name}_{i}_{t.timestamp()}"
-            is_closing = t in closing_times
+        for i, pc in enumerate(planned):
+            job_id = f"capture_{target.name}_{i}_{pc.run_at.timestamp()}"
             scheduler.add_job(
                 run_capture_job,
-                trigger=DateTrigger(run_date=t),
-                args=[target.name, config.db_path, config.min_remaining_credits, is_closing],
+                trigger=DateTrigger(run_date=pc.run_at),
+                args=[target.name, config.db_path, config.min_remaining_credits, pc.is_closing],
                 id=job_id,
                 replace_existing=True,
                 # Default de APScheduler es 1s: un retraso mínimo (hilo ocupado, sleep
@@ -162,8 +122,8 @@ def schedule_captures(
                 misfire_grace_time=90,
             )
 
-        logger.info("Programadas %d capturas para target %s", len(filtered_times), target.name)
-        total_jobs += len(filtered_times)
+        logger.info("Programadas %d capturas para target %s", len(planned), target.name)
+        total_jobs += len(planned)
 
     # Re-programar este mismo descubrimiento (R8)
     scheduler.add_job(
