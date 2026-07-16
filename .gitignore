@@ -52,3 +52,4 @@ data/*.sqlite
 data/*.sqlite3
 .tokensave
 logs/
+.aider*
