@@ -19,7 +19,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import pandas as pd
 import streamlit as st
 
-from config import load_config
+from config import load_config, load_dotenv
 from dashboard.queries import (
     capture_health,
     clv_by_soft_book,
@@ -31,8 +31,21 @@ from storage.db import get_connection
 
 st.set_page_config(page_title="CLV POC", layout="wide")
 
+# La sección "Próximas capturas" llama a get_events (necesita ODDS_API_KEY).
+load_dotenv()
+
 config = load_config()
 con = get_connection(config.db_path, read_only=True)
+
+
+@st.cache_data(ttl=300)
+def _upcoming_schedule():
+    """Recompute del schedule del daemon (get_events, 0 créditos). Cacheado 5 min
+    para no llamar a la red en cada rerun de Streamlit."""
+    from client.odds_api import OddsApiClient
+    from scheduler.preview import build_schedule_rows
+
+    return build_schedule_rows(OddsApiClient(), load_config())
 
 st.title("CLV POC — Edge A")
 
@@ -84,6 +97,33 @@ if event_rows:
     st.caption("Eje X: horas hasta el inicio del partido (baja hacia 0 = cierre).")
 else:
     st.info("Todavía no hay eventos en clv_snapshots.")
+
+st.header("Próximas capturas programadas")
+st.caption(
+    "Recompute vía get_events (coste 0 créditos): lo que el daemon programaría con un "
+    "discovery en este instante. El jobstore del daemon es en memoria y no se "
+    "introspecciona; esto se recalcula (cache 5 min)."
+)
+try:
+    schedule_rows = _upcoming_schedule()
+except Exception as exc:  # falta ODDS_API_KEY, red caída, etc.
+    st.warning(f"No se pudo recalcular el schedule (¿ODDS_API_KEY, red?): {exc}")
+    schedule_rows = []
+
+if schedule_rows:
+    sched_df = pd.DataFrame(schedule_rows)
+    sched_df["run_at"] = pd.to_datetime(sched_df["run_at"])
+    view = sched_df[["target", "run_at", "role", "events_desc"]].rename(
+        columns={"run_at": "run_at (UTC)", "events_desc": "evento(s)"}
+    )
+    st.dataframe(view, width="stretch")
+    n_closing = int(sched_df["is_closing"].sum())
+    st.caption(
+        f"{len(sched_df)} capturas ({n_closing} cierre, {len(sched_df) - n_closing} "
+        "trayectoria) · coste 0 créditos."
+    )
+else:
+    st.info("Sin capturas próximas (o no se pudo consultar la API).")
 
 st.header("Salud de captura")
 health_rows = capture_health(con)
