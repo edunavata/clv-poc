@@ -1,6 +1,6 @@
 from datetime import datetime, timedelta
 
-from storage.db import closing_lines, get_connection, insert_snapshot_rows
+from storage.db import closing_lines, get_connection, insert_snapshot_rows, replace_clv_snapshots
 
 COMMENCE = datetime(2026, 7, 10, 20, 0, 0)
 
@@ -100,6 +100,64 @@ def test_closing_lines_exposes_captured_at_of_winning_row(tmp_path):
     row = result[0]
     assert row[7] == COMMENCE - timedelta(minutes=30)  # closing_last_update (Pinnacle)
     assert row[8] == COMMENCE - timedelta(minutes=2)  # closing_captured_at (nuestro sondeo)
+
+
+def _clv_row(sport_key, event_id="evt1", soft_book="williamhill", clv=0.02):
+    return {
+        "sport_key": sport_key,
+        "event_id": event_id,
+        "home_team": "Team A",
+        "away_team": "Team B",
+        "market": "h2h",
+        "outcome": "Team A",
+        "soft_book": soft_book,
+        "commence_time": COMMENCE,
+        "captured_at": COMMENCE - timedelta(hours=1),
+        "hours_to_commence": 1.0,
+        "soft_odds": 2.10,
+        "pinnacle_closing_odds": 1.95,
+        "pinnacle_closing_last_update": COMMENCE - timedelta(minutes=5),
+        "hours_before_commence": 0.1,
+        "pinnacle_fair_prob": 0.49,
+        "clv": clv,
+        "is_valid_closing_benchmark": True,
+        "snapshot_role": "trajectory",
+    }
+
+
+def test_replace_clv_snapshots_preserves_other_sports(tmp_path):
+    """--target de un deporte no debe borrar los sport_keys de otros targets."""
+    con = get_connection(tmp_path / "odds.duckdb")
+
+    replace_clv_snapshots(con, [_clv_row("soccer_usa_mls")], ["soccer_usa_mls"])
+    replace_clv_snapshots(con, [_clv_row("baseball_mlb")], ["baseball_mlb"])
+
+    counts = dict(
+        con.execute("SELECT sport_key, count(*) FROM clv_snapshots GROUP BY 1").fetchall()
+    )
+    assert counts == {"soccer_usa_mls": 1, "baseball_mlb": 1}
+
+
+def test_replace_clv_snapshots_same_sport_does_not_duplicate(tmp_path):
+    con = get_connection(tmp_path / "odds.duckdb")
+
+    replace_clv_snapshots(con, [_clv_row("soccer_usa_mls")], ["soccer_usa_mls"])
+    replace_clv_snapshots(
+        con, [_clv_row("soccer_usa_mls", clv=0.05)], ["soccer_usa_mls"]
+    )
+
+    rows = con.execute("SELECT clv FROM clv_snapshots").fetchall()
+    assert rows == [(0.05,)]
+
+
+def test_replace_clv_snapshots_deletes_sport_with_no_new_rows(tmp_path):
+    """Un run que procesa un deporte sin filas nuevas limpia su parte del mart."""
+    con = get_connection(tmp_path / "odds.duckdb")
+
+    replace_clv_snapshots(con, [_clv_row("soccer_usa_mls")], ["soccer_usa_mls"])
+    replace_clv_snapshots(con, [], ["soccer_usa_mls"])
+
+    assert con.execute("SELECT count(*) FROM clv_snapshots").fetchone()[0] == 0
 
 
 def test_closing_lines_uses_latest_commence_after_postponement(tmp_path):
