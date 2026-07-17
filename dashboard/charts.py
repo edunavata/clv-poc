@@ -189,7 +189,7 @@ def sample_growth_line(growth: pd.DataFrame, target: int = 100) -> alt.Chart:
 # la paleta categórica de books, para que la referencia sharp se lea distinta de
 # cualquier soft book y no compita con ellos por atención.
 PINNACLE_COLOR = "#3a3a3a"
-PINNACLE_LABEL = "Pinnacle (en vivo)"
+PINNACLE_LABEL = "Pinnacle"
 
 
 def trajectory_chart(
@@ -223,7 +223,10 @@ def trajectory_chart(
         .encode(
             x=x,
             y="soft_odds:Q",
-            color=alt.Color("soft_book:N", scale=scale),
+            # legend=None: la leyenda de books ya la aporta la capa de líneas
+            # (title="book"); sin esto los puntos generan una segunda leyenda
+            # "soft_book" duplicada.
+            color=alt.Color("soft_book:N", scale=scale, legend=None),
             shape=alt.Shape("snapshot_role:N", title="rol"),
             tooltip=[
                 alt.Tooltip("soft_book", title="book"),
@@ -258,7 +261,7 @@ def trajectory_chart(
             .encode(
                 x=x,
                 y="pinnacle_odds:Q",
-                color=pin_color,
+                color=alt.Color("series:N", scale=pin_scale, legend=None),
                 tooltip=[
                     alt.Tooltip("series", title=None),
                     alt.Tooltip("pinnacle_odds", title="cuota", format=".2f"),
