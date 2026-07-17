@@ -51,10 +51,11 @@ FROM snapshots
 WHERE sport_key = ? AND captured_at < commence_time AND book IN ({books})
 """
 
-# Mart derivado: se reconstruye entero en cada run (full refresh). No es append-only
-# como snapshots -- es una vista materializada del cálculo de CLV, siempre regenerable.
+# Mart derivado: cada run regenera los sport_keys que procesa (delete + insert por
+# deporte). No es append-only como snapshots -- es una vista materializada del cálculo
+# de CLV, siempre regenerable.
 CLV_SNAPSHOTS_SCHEMA = """
-CREATE OR REPLACE TABLE clv_snapshots (
+CREATE TABLE IF NOT EXISTS clv_snapshots (
     sport_key                    VARCHAR NOT NULL,
     event_id                     VARCHAR NOT NULL,
     home_team                    VARCHAR NOT NULL,
@@ -141,9 +142,18 @@ def soft_snapshots(
     return con.execute(query, [sport_key, *soft_books]).fetchall()
 
 
-def replace_clv_snapshots(con: duckdb.DuckDBPyConnection, rows: list[dict]) -> int:
-    """Reconstruye la tabla clv_snapshots entera (full refresh) e inserta rows. Idempotente."""
+def replace_clv_snapshots(
+    con: duckdb.DuckDBPyConnection, rows: list[dict], sport_keys: list[str]
+) -> int:
+    """Regenera clv_snapshots solo para sport_keys (delete + insert) e inserta rows.
+
+    Idempotente por deporte: un run con --target no borra los sport_keys de otros
+    targets ya materializados.
+    """
     con.execute(CLV_SNAPSHOTS_SCHEMA)
+    if sport_keys:
+        placeholders = ", ".join("?" for _ in sport_keys)
+        con.execute(f"DELETE FROM clv_snapshots WHERE sport_key IN ({placeholders})", sport_keys)
     for row in rows:
         con.execute(
             INSERT_CLV_QUERY,

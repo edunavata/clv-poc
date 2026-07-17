@@ -190,7 +190,7 @@ def main(argv: list[str] | None = None) -> int:
             events_without_closing,
         )
 
-    inserted = replace_clv_snapshots(con, all_rows)
+    inserted = replace_clv_snapshots(con, all_rows, [t.sport_key for t in targets])
     con.close()
     logger.info(
         "clv_snapshots reconstruida: %d filas totales, %d descartadas por falta de cierre, "
