@@ -4,6 +4,7 @@ from scheduler.planning import (
     DISCOVERY_INTERVAL_HOURS,
     PlannedCapture,
     plan_capture_times,
+    split_due_and_moved,
 )
 
 
@@ -137,3 +138,37 @@ def test_results_sorted_ascending():
     planned = plan_capture_times(events, now, poll_interval_hours=3)
     times = [pc.run_at for pc in planned]
     assert times == sorted(times)
+
+
+class TestSplitDueAndMoved:
+    NOW = datetime(2026, 7, 17, 4, 24, 0, tzinfo=UTC)
+
+    def test_unchanged_commence_is_due(self):
+        checks = [("evt1", "2026-07-17T04:30:00Z")]
+        current = {"evt1": "2026-07-17T04:30:00Z"}
+        due, moved = split_due_and_moved(checks, current, self.NOW)
+        assert due == ["evt1"] and moved == []
+
+    def test_postponed_to_future_is_moved(self):
+        checks = [("evt1", "2026-07-17T04:30:00Z")]
+        current = {"evt1": "2026-07-17T04:46:00Z"}
+        due, moved = split_due_and_moved(checks, current, self.NOW)
+        assert due == [] and moved == [("evt1", "2026-07-17T04:46:00Z")]
+
+    def test_missing_event_is_due_fail_open(self):
+        checks = [("evt1", "2026-07-17T04:30:00Z")]
+        due, moved = split_due_and_moved(checks, {}, self.NOW)
+        assert due == ["evt1"] and moved == []
+
+    def test_moved_to_past_is_due_fail_open(self):
+        # adelantado o ya empezado: capturar ahora es lo mejor disponible
+        checks = [("evt1", "2026-07-17T04:30:00Z")]
+        current = {"evt1": "2026-07-17T04:00:00Z"}
+        due, moved = split_due_and_moved(checks, current, self.NOW)
+        assert due == ["evt1"] and moved == []
+
+    def test_mixed_burst(self):
+        checks = [("evt1", "2026-07-17T04:30:00Z"), ("evt2", "2026-07-17T04:30:00Z")]
+        current = {"evt1": "2026-07-17T04:30:00Z", "evt2": "2026-07-17T05:30:00Z"}
+        due, moved = split_due_and_moved(checks, current, self.NOW)
+        assert due == ["evt1"] and moved == [("evt2", "2026-07-17T05:30:00Z")]
