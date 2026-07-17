@@ -53,3 +53,5 @@ data/*.sqlite3
 .tokensave
 logs/
 .aider*
+.claude/
+.agents/
