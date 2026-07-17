@@ -127,6 +127,36 @@ FROM snapshots
 ORDER BY sport_key, captured_at
 """
 
+EVENTS_SUMMARY_QUERY = """
+SELECT
+    event_id,
+    sport_key,
+    home_team,
+    away_team,
+    commence_time,
+    count(*) AS n_snapshots,
+    bool_or(is_valid_closing_benchmark) AS has_valid_benchmark
+FROM clv_snapshots
+GROUP BY event_id, sport_key, home_team, away_team, commence_time
+ORDER BY has_valid_benchmark DESC, commence_time DESC
+"""
+
+SNAPSHOT_GROWTH_QUERY = """
+SELECT
+    day,
+    sport_key,
+    n_rows,
+    sum(n_rows) OVER (PARTITION BY sport_key ORDER BY day) AS cumulative_rows
+FROM (
+    SELECT date_trunc('day', captured_at) AS day, sport_key, count(*) AS n_rows
+    FROM snapshots
+    GROUP BY 1, 2
+)
+ORDER BY day, sport_key
+"""
+
+RAW_SNAPSHOTS_QUERY = "SELECT * FROM snapshots ORDER BY captured_at DESC"
+
 
 def clv_by_soft_book(con: duckdb.DuckDBPyConnection) -> list[tuple]:
     """CLV medio por soft book, solo sobre benchmarks de cierre válidos
@@ -197,3 +227,21 @@ def capture_polls(con: duckdb.DuckDBPyConnection):
 def poll_timestamps(con: duckdb.DuckDBPyConnection):
     """Timestamps de captura distintos por sport, para detectar gaps."""
     return con.execute(POLL_TIMESTAMPS_QUERY).fetchdf()
+
+
+def events_summary(con: duckdb.DuckDBPyConnection):
+    """Eventos del mart con contexto para el selector de trayectorias: deporte,
+    nº de snapshots y si tienen benchmark de cierre válido (los que permiten
+    calcular CLV van primero)."""
+    return con.execute(EVENTS_SUMMARY_QUERY).fetchdf()
+
+
+def snapshot_growth(con: duckdb.DuckDBPyConnection):
+    """Filas de snapshots acumuladas por día y deporte: verifica que la
+    captura crece día a día (equivalente crudo del tracker de CLVs)."""
+    return con.execute(SNAPSHOT_GROWTH_QUERY).fetchdf()
+
+
+def raw_snapshots(con: duckdb.DuckDBPyConnection):
+    """Tabla snapshots completa como DataFrame, para inspección cruda."""
+    return con.execute(RAW_SNAPSHOTS_QUERY).fetchdf()

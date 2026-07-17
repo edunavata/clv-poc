@@ -27,11 +27,25 @@ PCT_FMT = "+.2%"
 SEQUENTIAL_BLUES = ["#cde2fb", "#9ec5f4", "#6da7ec", "#3987e5", "#256abf", "#184f95"]
 
 
-def book_scale(books: pd.Series) -> alt.Scale:
-    """Escala color->book estable: dominio fijo por KNOWN_BOOKS + extras al final."""
-    extras = sorted(set(books) - set(KNOWN_BOOKS))
-    domain = [b for b in KNOWN_BOOKS if b in set(books)] + extras
+# Sports conocidos, mismo mecanismo de color estable que los books.
+KNOWN_SPORTS = ["baseball_mlb", "soccer_fifa_world_cup", "soccer_usa_mls"]
+
+
+def _stable_scale(values: pd.Series, known: list[str]) -> alt.Scale:
+    """Escala color->entidad estable: dominio fijo por lista conocida + extras
+    alfabéticos al final, para que el color siga a la entidad en todos los
+    gráficos y no cambie al filtrar."""
+    extras = sorted(set(values) - set(known))
+    domain = [v for v in known if v in set(values)] + extras
     return alt.Scale(domain=domain, range=CATEGORICAL[: len(domain)])
+
+
+def book_scale(books: pd.Series) -> alt.Scale:
+    return _stable_scale(books, KNOWN_BOOKS)
+
+
+def sport_scale(sports: pd.Series) -> alt.Scale:
+    return _stable_scale(sports, KNOWN_SPORTS)
 
 
 def _zero_rule() -> alt.Chart:
@@ -212,6 +226,27 @@ def trajectory_chart(traj: pd.DataFrame, closing_odds: float) -> alt.Chart:
         .encode(y="y:Q", tooltip=[alt.Tooltip("label", title=None), alt.Tooltip("y", title="cuota", format=".2f")])
     )
     return (lines + points + closing).properties(height=320)
+
+
+def capture_growth_line(growth: pd.DataFrame) -> alt.Chart:
+    """Snapshots crudos acumulados por día y deporte: la línea debe subir cada
+    día que el daemon capturó; un tramo plano es un día sin capturas."""
+    return (
+        alt.Chart(growth)
+        .mark_line(strokeWidth=2, point=alt.OverlayMarkDef(size=60, filled=True))
+        .encode(
+            x=alt.X("day:T", title=None),
+            y=alt.Y("cumulative_rows:Q", title="snapshots acumulados"),
+            color=alt.Color("sport_key:N", scale=sport_scale(growth["sport_key"]), title="deporte"),
+            tooltip=[
+                alt.Tooltip("day:T", title="día"),
+                alt.Tooltip("sport_key", title="deporte"),
+                alt.Tooltip("n_rows", title="nuevas"),
+                alt.Tooltip("cumulative_rows", title="acumulado"),
+            ],
+        )
+        .properties(height=260)
+    )
 
 
 def clv_trajectory_chart(traj: pd.DataFrame) -> alt.Chart:

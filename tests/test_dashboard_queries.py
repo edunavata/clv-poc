@@ -5,9 +5,12 @@ from dashboard.queries import (
     clv_stats_by_book,
     clv_stats_by_sport_book,
     clv_values,
+    events_summary,
     kpi_summary,
     poll_timestamps,
+    raw_snapshots,
     sample_growth,
+    snapshot_growth,
 )
 from storage.db import get_connection, insert_snapshot_rows, replace_clv_snapshots
 
@@ -132,3 +135,24 @@ def test_capture_polls_counts_distinct_minutes(tmp_path):
 def test_poll_timestamps_distinct(tmp_path):
     ts = poll_timestamps(_seeded_con(tmp_path))
     assert len(ts) == 2  # 3 filas raw, 2 instantes distintos
+
+
+def test_events_summary_flags_valid_benchmark_first(tmp_path):
+    summary = events_summary(_seeded_con(tmp_path))
+    assert len(summary) == 4  # evt1..evt4
+    # evt3 es el único sin benchmark válido: debe ir al final
+    assert not summary.iloc[-1]["has_valid_benchmark"]
+    assert summary.iloc[-1]["event_id"] == "evt3"
+    assert summary["has_valid_benchmark"].iloc[:3].all()
+
+
+def test_snapshot_growth_accumulates_per_sport(tmp_path):
+    growth = snapshot_growth(_seeded_con(tmp_path))
+    mls = growth[growth["sport_key"] == "soccer_usa_mls"]
+    assert list(mls["cumulative_rows"]) == [1, 3]  # 1 el día previo, +2 el día del evento
+
+
+def test_raw_snapshots_returns_all_rows(tmp_path):
+    raw = raw_snapshots(_seeded_con(tmp_path))
+    assert len(raw) == 3
+    assert "odds" in raw.columns
