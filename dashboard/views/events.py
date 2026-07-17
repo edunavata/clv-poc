@@ -88,7 +88,11 @@ def render() -> None:
 
         st.caption(f"{len(filtered)} de {len(summary)} eventos.")
         options = {_event_label(row): row["event_id"] for _, row in filtered.iterrows()}
-        label = st.selectbox("Evento", list(options.keys()))
+        # key= fija la identidad del widget: sin ella, la primera interacción con el
+        # filtro de arriba (segmented_control) reconstruye la lista de opciones y
+        # Streamlit descarta la selección, devolviéndola al índice 0 en cada clic
+        # posterior — el usuario no podía abrir eventos "sin cierre".
+        label = st.selectbox("Evento", list(options.keys()), key="event_select")
         traj = trajectory_for_event(con, options[label])
 
     event = filtered[filtered["event_id"] == options[label]].iloc[0]
