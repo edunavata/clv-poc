@@ -6,14 +6,20 @@ import pandas as pd
 import streamlit as st
 
 from dashboard.charts import clv_trajectory_chart, trajectory_chart
-from dashboard.queries import events_summary, trajectory_for_event
+from dashboard.queries import (
+    events_summary,
+    pinnacle_trajectory_for_event,
+    trajectory_for_event,
+)
 from dashboard.views.common import chart_help, db_connection, sport_label
 
 TRAJECTORY_HELP = """
 Cada línea de color es una casa de apuestas soft y muestra el precio (cuota)
 que publicó para este resultado a lo largo del tiempo. La línea discontinua
 horizontal es el **precio de cierre de Pinnacle**, la referencia que
-consideramos "el precio correcto".
+consideramos "el precio correcto". La línea gris oscura con rombos es la
+**cuota de Pinnacle en vivo**: cómo se movió la referencia sharp snapshot a
+snapshot hasta converger en ese cierre.
 
 - El eje horizontal son las **horas que faltan para el partido**: la izquierda
   es "faltan muchas horas" y la derecha es "el partido está a punto de empezar".
@@ -94,6 +100,7 @@ def render() -> None:
         # posterior — el usuario no podía abrir eventos "sin cierre".
         label = st.selectbox("Evento", list(options.keys()), key="event_select")
         traj = trajectory_for_event(con, options[label])
+        pinnacle_traj = pinnacle_trajectory_for_event(con, options[label])
 
     event = filtered[filtered["event_id"] == options[label]].iloc[0]
     # La validez del benchmark es por outcome, no por evento: Pinnacle puede no
@@ -110,6 +117,7 @@ def render() -> None:
         ),
     )
     subset = traj[traj["outcome"] == outcome]
+    pinnacle_subset = pinnacle_traj[pinnacle_traj["outcome"] == outcome]
 
     closing_odds = float(subset["pinnacle_closing_odds"].iloc[0])
     st.subheader(f"Cuota soft vs cierre Pinnacle — {outcome}")
@@ -118,7 +126,7 @@ def render() -> None:
             ":material/warning: Este evento no tiene cierre fiable todavía: la línea "
             "'cierre Pinnacle' es el último precio capturado y puede seguir moviéndose."
         )
-    st.altair_chart(trajectory_chart(subset, closing_odds), width="stretch")
+    st.altair_chart(trajectory_chart(subset, closing_odds, pinnacle_subset), width="stretch")
     chart_help(TRAJECTORY_HELP)
 
     with_clv = subset[subset["clv"].notna()]

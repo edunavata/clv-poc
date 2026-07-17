@@ -7,6 +7,7 @@ from dashboard.queries import (
     clv_values,
     events_summary,
     kpi_summary,
+    pinnacle_trajectory_for_event,
     poll_timestamps,
     raw_snapshots,
     sample_growth,
@@ -156,3 +157,13 @@ def test_raw_snapshots_returns_all_rows(tmp_path):
     raw = raw_snapshots(_seeded_con(tmp_path))
     assert len(raw) == 3
     assert "odds" in raw.columns
+
+
+def test_pinnacle_trajectory_only_pinnacle_rows(tmp_path):
+    traj = pinnacle_trajectory_for_event(_seeded_con(tmp_path), "evt1")
+    # 2 capturas de pinnacle; la fila de bookA (mismo poll) queda fuera
+    assert len(traj) == 2
+    assert set(traj["pinnacle_odds"]) == {1.90}
+    # hours_to_commence derivado de commence - captured: 24h y 1h
+    assert sorted(round(h, 1) for h in traj["hours_to_commence"]) == [1.0, 24.0]
+    assert set(traj["outcome"]) == {"Team A"}

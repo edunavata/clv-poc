@@ -18,7 +18,7 @@ import duckdb
 import pytest
 from streamlit.testing.v1 import AppTest
 
-from storage.db import CLV_SNAPSHOTS_SCHEMA
+from storage.db import CLV_SNAPSHOTS_SCHEMA, SCHEMA
 
 
 def _seed_row(con, *, event_id, home, valid, outcome, soft_odds, clv):
@@ -41,16 +41,40 @@ def _seed_row(con, *, event_id, home, valid, outcome, soft_odds, clv):
     )
 
 
+def _seed_pinnacle(con, *, event_id, outcome, hours, odds):
+    """Una captura de Pinnacle en la tabla snapshots cruda (cuota en vivo)."""
+    con.execute(
+        """
+        INSERT INTO snapshots (
+            captured_at, sport_key, event_id, commence_time, home_team,
+            away_team, book, market, outcome, odds, api_last_update
+        ) VALUES (?, 'soccer_usa_mls', ?, ?, 'Home', 'Away FC', 'pinnacle',
+                  'h2h', ?, ?, ?)
+        """,
+        [
+            datetime(2026, 7, 20 - (1 if hours >= 24 else 0), 0 if hours >= 24 else 23, 0),
+            event_id, datetime(2026, 7, 20, 0, 0), outcome, odds,
+            datetime(2026, 7, 19, 23, 0),
+        ],
+    )
+
+
 @pytest.fixture
 def events_db(tmp_path):
     """BD temporal con un evento con CLV válido y otro sin cierre fiable."""
     db = tmp_path / "odds.duckdb"
     con = duckdb.connect(str(db))
     con.execute(CLV_SNAPSHOTS_SCHEMA)
+    con.execute(SCHEMA)
     _seed_row(con, event_id="valid1", home="Valid Home", valid=True,
               outcome="Valid Home", soft_odds=2.10, clv=0.05)
     _seed_row(con, event_id="nocierre1", home="Pending Home", valid=False,
               outcome="Pending Home", soft_odds=1.95, clv=None)
+    # Pinnacle en vivo: dos capturas por evento para dibujar la curva sharp.
+    _seed_pinnacle(con, event_id="valid1", outcome="Valid Home", hours=24, odds=2.05)
+    _seed_pinnacle(con, event_id="valid1", outcome="Valid Home", hours=1, odds=2.0)
+    _seed_pinnacle(con, event_id="nocierre1", outcome="Pending Home", hours=24, odds=1.9)
+    _seed_pinnacle(con, event_id="nocierre1", outcome="Pending Home", hours=1, odds=1.92)
     con.close()
     return str(db)
 

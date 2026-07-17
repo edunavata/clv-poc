@@ -185,11 +185,25 @@ def sample_growth_line(growth: pd.DataFrame, target: int = 100) -> alt.Chart:
     return (line + rule).properties(height=260)
 
 
-def trajectory_chart(traj: pd.DataFrame, closing_odds: float) -> alt.Chart:
-    """Trayectoria de cuotas soft de un outcome vs el cierre de Pinnacle.
+# Color reservado para Pinnacle en la trayectoria: gris oscuro neutro, fuera de
+# la paleta categórica de books, para que la referencia sharp se lea distinta de
+# cualquier soft book y no compita con ellos por atención.
+PINNACLE_COLOR = "#3a3a3a"
+PINNACLE_LABEL = "Pinnacle (en vivo)"
+
+
+def trajectory_chart(
+    traj: pd.DataFrame,
+    closing_odds: float,
+    pinnacle: pd.DataFrame | None = None,
+) -> alt.Chart:
+    """Trayectoria de cuotas soft de un outcome vs Pinnacle.
 
     Eje X invertido: el tiempo fluye hacia el cierre (0h) a la derecha.
     Shape distingue snapshots de trayectoria vs ráfaga de cierre.
+    Si se pasa ``pinnacle`` (cuota sharp en vivo snapshot a snapshot), se dibuja
+    su curva además de la regla horizontal del cierre fijo: así se ve cómo se
+    movió la referencia, no solo dónde acabó.
     """
     scale = book_scale(traj["soft_book"])
     x = alt.X(
@@ -225,7 +239,39 @@ def trajectory_chart(traj: pd.DataFrame, closing_odds: float) -> alt.Chart:
         .mark_rule(strokeWidth=2, strokeDash=[6, 3])
         .encode(y="y:Q", tooltip=[alt.Tooltip("label", title=None), alt.Tooltip("y", title="cuota", format=".2f")])
     )
-    return (lines + points + closing).properties(height=320)
+    layers = [lines, points, closing]
+
+    if pinnacle is not None and not pinnacle.empty:
+        # Escala de color propia (un solo miembro) para que Pinnacle aparezca en
+        # su propia leyenda sin robar un slot de la paleta de books.
+        pin = pinnacle.assign(series=PINNACLE_LABEL)
+        pin_scale = alt.Scale(domain=[PINNACLE_LABEL], range=[PINNACLE_COLOR])
+        pin_color = alt.Color("series:N", scale=pin_scale, title=None)
+        pin_line = (
+            alt.Chart(pin)
+            .mark_line(strokeWidth=2.5)
+            .encode(x=x, y=alt.Y("pinnacle_odds:Q", scale=alt.Scale(zero=False)), color=pin_color)
+        )
+        pin_points = (
+            alt.Chart(pin)
+            .mark_point(size=60, filled=True, shape="diamond")
+            .encode(
+                x=x,
+                y="pinnacle_odds:Q",
+                color=pin_color,
+                tooltip=[
+                    alt.Tooltip("series", title=None),
+                    alt.Tooltip("pinnacle_odds", title="cuota", format=".2f"),
+                    alt.Tooltip("hours_to_commence", title="h al kickoff", format=".1f"),
+                    alt.Tooltip("captured_at:T", title="capturado"),
+                ],
+            )
+        )
+        layers += [pin_line, pin_points]
+
+    # color independiente: books y Pinnacle son dos leyendas distintas (dos
+    # escalas), no una sola paleta compartida.
+    return alt.layer(*layers).resolve_scale(color="independent").properties(height=320)
 
 
 def capture_growth_line(growth: pd.DataFrame) -> alt.Chart:
