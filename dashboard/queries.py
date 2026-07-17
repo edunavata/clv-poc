@@ -28,6 +28,16 @@ TRAJECTORY_QUERY = """
     ORDER BY hours_to_commence DESC
 """
 
+PINNACLE_TRAJECTORY_QUERY = """
+    SELECT market, outcome,
+           (epoch(commence_time) - epoch(captured_at)) / 3600.0 AS hours_to_commence,
+           odds AS pinnacle_odds,
+           captured_at
+    FROM snapshots
+    WHERE event_id = ? AND book = 'pinnacle'
+    ORDER BY hours_to_commence DESC
+"""
+
 CAPTURE_HEALTH_QUERY = """
     SELECT date_trunc('day', captured_at) AS day, sport_key, count(*) AS n
     FROM snapshots
@@ -177,6 +187,14 @@ def trajectory_for_event(con: duckdb.DuckDBPyConnection, event_id: str):
     Incluye outcome: un chart por outcome, nunca mezclados (sus cuotas no
     son comparables ni promediables)."""
     return con.execute(TRAJECTORY_QUERY, [event_id]).fetchdf()
+
+
+def pinnacle_trajectory_for_event(con: duckdb.DuckDBPyConnection, event_id: str):
+    """Cuota de Pinnacle EN VIVO snapshot a snapshot (tabla snapshots cruda),
+    no el cierre fijo. Permite dibujar cómo se movió la referencia sharp según
+    se acercaba el kickoff, junto a las líneas soft. hours_to_commence se deriva
+    aquí con el mismo criterio que el mart (commence - captured)."""
+    return con.execute(PINNACLE_TRAJECTORY_QUERY, [event_id]).fetchdf()
 
 
 def capture_health(con: duckdb.DuckDBPyConnection) -> list[tuple]:
