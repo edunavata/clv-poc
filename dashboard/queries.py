@@ -127,17 +127,19 @@ FROM snapshots
 ORDER BY sport_key, captured_at
 """
 
+# max(commence_time), no GROUP BY commence_time: un partido aplazado tiene filas
+# con varios kickoffs y debe salir UNA vez, con el último conocido.
 EVENTS_SUMMARY_QUERY = """
 SELECT
     event_id,
     sport_key,
     home_team,
     away_team,
-    commence_time,
+    max(commence_time) AS commence_time,
     count(*) AS n_snapshots,
     bool_or(is_valid_closing_benchmark) AS has_valid_benchmark
 FROM clv_snapshots
-GROUP BY event_id, sport_key, home_team, away_team, commence_time
+GROUP BY event_id, sport_key, home_team, away_team
 ORDER BY has_valid_benchmark DESC, commence_time DESC
 """
 
