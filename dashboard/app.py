@@ -19,7 +19,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import streamlit as st
 
 from config import load_dotenv
-from dashboard.views import events, operations, overview
+from dashboard.views import events, guide, operations, overview
 
 st.set_page_config(page_title="CLV POC", layout="wide")
 
@@ -33,6 +33,7 @@ pages = [
         operations.render, title="Operaciones", icon=":material/monitor_heart:",
         url_path="operations",
     ),
+    st.Page(guide.render, title="Guía", icon=":material/menu_book:", url_path="guide"),
 ]
 
 st.navigation(pages).run()

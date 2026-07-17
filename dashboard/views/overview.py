@@ -22,7 +22,57 @@ from dashboard.queries import (
     sample_growth,
 )
 from dashboard.transforms import SAMPLE_TARGET, book_stats_frame, bucket_hours
-from dashboard.views.common import db_connection
+from dashboard.views.common import chart_help, db_connection
+
+BAR_HELP = """
+Cada barra es una casa de apuestas soft. La altura dice, en promedio, cuánto
+mejor o peor eran sus precios comparados con el cierre de Pinnacle (el "precio
+correcto" de referencia).
+
+- Barra que baja de la línea 0 = precios **peores** que el cierre (lo normal).
+- Barra que sube de 0 = precios **mejores** que el cierre = ventaja explotable.
+- La rayita vertical negra es el **margen de error** (intervalo de confianza
+  95%): el valor real está casi seguro dentro de ese rango. Si la rayita cruza
+  el 0, aún no se puede afirmar nada con esa casa.
+"""
+
+DIST_HELP = """
+Arriba: cada caja resume TODOS los CLV de una casa, no solo su media. La línea
+del centro de la caja es el valor típico (mediana); la caja cubre la mitad
+central de los casos; los puntos sueltos son casos raros.
+
+Abajo: cuántos snapshots caen en cada rango de CLV. Las barras a la derecha
+del 0% son capturas que batieron al cierre.
+
+**Por qué importa**: una media negativa puede esconder una minoría de capturas
+muy buenas (cola derecha). Si toda la masa está a la izquierda del 0, no hay
+nada que rascar.
+"""
+
+HORIZON_HELP = """
+Lo mismo que el gráfico de barras, pero separado por **cuántas horas faltaban
+para el partido** cuando se capturó el precio.
+
+- Cada grupo del eje horizontal es una franja: "0-1h" = capturas en la última
+  hora, "24h+" = capturas con más de un día de antelación.
+- **Qué buscar**: si alguna franja tiene puntos por encima de 0 con su margen
+  de error también por encima, esa sería LA ventana donde apostar.
+"""
+
+SPORT_HELP = """
+El mismo CLV medio, separado por competición. Se separan porque no son
+comparables: un partido de fútbol tiene 3 resultados posibles y uno de béisbol
+2, y eso cambia cómo se calculan las probabilidades.
+
+También delata si un resultado global viene dominado por un solo deporte con
+muchos datos (mira la 'n' en el tooltip de cada barra).
+"""
+
+GROWTH_HELP = """
+Cuántos CLV medibles llevamos acumulados día a día. La línea discontinua es la
+meta de 100: por debajo de eso, cualquier conclusión es prematura por pura
+falta de datos. La pendiente dice a qué ritmo crece la evidencia.
+"""
 
 
 def render() -> None:
@@ -65,6 +115,7 @@ def render() -> None:
 
     st.subheader("CLV medio por soft book (CI 95%)")
     st.altair_chart(clv_by_book_bar(book_stats_frame(stats)), width="stretch")
+    chart_help(BAR_HELP)
     st.dataframe(
         book_stats_frame(stats),
         width="stretch",
@@ -85,13 +136,17 @@ def render() -> None:
     st.subheader("Distribución de CLV")
     st.caption("La media puede ocultar una cola positiva explotable (o al revés).")
     st.altair_chart(clv_distribution(values), width="stretch")
+    chart_help(DIST_HELP)
 
     st.subheader("CLV por horizonte al kickoff")
     st.caption("¿A qué distancia del cierre aparece el edge, si existe?")
     st.altair_chart(clv_vs_horizon(bucket_hours(values)), width="stretch")
+    chart_help(HORIZON_HELP)
 
     st.subheader("CLV por deporte")
     st.altair_chart(clv_by_sport(sport_stats), width="content")
+    chart_help(SPORT_HELP)
 
     st.subheader("Crecimiento de la muestra")
     st.altair_chart(sample_growth_line(growth, SAMPLE_TARGET), width="stretch")
+    chart_help(GROWTH_HELP)
