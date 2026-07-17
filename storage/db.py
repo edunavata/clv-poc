@@ -23,15 +23,31 @@ CREATE TABLE IF NOT EXISTS snapshots (
 )
 """
 
-CLOSING_LINES_QUERY = """
-SELECT event_id, market, outcome, home_team, away_team, commence_time,
-       arg_max(odds, api_last_update)        AS closing_odds,
-       max(api_last_update)                  AS closing_last_update,
-       arg_max(captured_at, api_last_update)  AS closing_captured_at
-FROM snapshots
-WHERE sport_key = ? AND book = ? AND api_last_update < commence_time
-GROUP BY event_id, market, outcome, home_team, away_team, commence_time
+# Los partidos se aplazan: la API actualiza commence_time y cada snapshot guarda el
+# valor vigente en su captura. El commence canónico de un evento es el de su captura
+# más reciente (cualquier book) -- usar el de cada fila mezclaría kickoffs viejos y
+# haría pasar por válido un "cierre" sondeado mucho antes del kickoff real.
+LATEST_COMMENCE_CTE = """
+WITH latest_commence AS (
+    SELECT event_id, arg_max(commence_time, captured_at) AS commence_time
+    FROM snapshots
+    WHERE sport_key = ?
+    GROUP BY event_id
+)
 """
+
+CLOSING_LINES_QUERY = (
+    LATEST_COMMENCE_CTE
+    + """
+SELECT s.event_id, s.market, s.outcome, s.home_team, s.away_team, l.commence_time,
+       arg_max(s.odds, s.api_last_update)        AS closing_odds,
+       max(s.api_last_update)                    AS closing_last_update,
+       arg_max(s.captured_at, s.api_last_update) AS closing_captured_at
+FROM snapshots s JOIN latest_commence l USING (event_id)
+WHERE s.sport_key = ? AND s.book = ? AND s.api_last_update < l.commence_time
+GROUP BY s.event_id, s.market, s.outcome, s.home_team, s.away_team, l.commence_time
+"""
+)
 
 INSERT_QUERY = """
 INSERT INTO snapshots
@@ -44,12 +60,16 @@ VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 # closing_lines NO colapsa a la última fila: devuelve cada snapshot, porque el análisis
 # de CLV es por-snapshot (queremos ver la trayectoria según se acerca el cierre).
 # El placeholder de books se expande en Python según cuántas soft books haya.
-SOFT_SNAPSHOTS_QUERY = """
-SELECT event_id, market, outcome, home_team, away_team, commence_time,
-       book, captured_at, odds
-FROM snapshots
-WHERE sport_key = ? AND captured_at < commence_time AND book IN ({books})
+# Mismo commence canónico que closing_lines (ver LATEST_COMMENCE_CTE).
+SOFT_SNAPSHOTS_QUERY = (
+    LATEST_COMMENCE_CTE
+    + """
+SELECT s.event_id, s.market, s.outcome, s.home_team, s.away_team, l.commence_time,
+       s.book, s.captured_at, s.odds
+FROM snapshots s JOIN latest_commence l USING (event_id)
+WHERE s.sport_key = ? AND s.captured_at < l.commence_time AND s.book IN ({books})
 """
+)
 
 # Mart derivado: se reconstruye entero en cada run (full refresh). No es append-only
 # como snapshots -- es una vista materializada del cálculo de CLV, siempre regenerable.
@@ -127,7 +147,7 @@ def insert_snapshot_rows(con: duckdb.DuckDBPyConnection, rows: list[dict]) -> in
 def closing_lines(con: duckdb.DuckDBPyConnection, sport_key: str, sharp_book: str) -> list[tuple]:
     """Última fila de sharp_book por api_last_update < commence_time (timestamp de validez
     del propio precio, no el instante de nuestro sondeo), por evento+outcome."""
-    return con.execute(CLOSING_LINES_QUERY, [sport_key, sharp_book]).fetchall()
+    return con.execute(CLOSING_LINES_QUERY, [sport_key, sport_key, sharp_book]).fetchall()
 
 
 def soft_snapshots(
@@ -138,7 +158,7 @@ def soft_snapshots(
         return []
     placeholders = ", ".join("?" for _ in soft_books)
     query = SOFT_SNAPSHOTS_QUERY.format(books=placeholders)
-    return con.execute(query, [sport_key, *soft_books]).fetchall()
+    return con.execute(query, [sport_key, sport_key, *soft_books]).fetchall()
 
 
 def replace_clv_snapshots(con: duckdb.DuckDBPyConnection, rows: list[dict]) -> int:

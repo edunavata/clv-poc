@@ -35,6 +35,35 @@ class PlannedCapture:
     events: tuple[dict, ...] = ()
 
 
+def split_due_and_moved(
+    event_checks: list[tuple[str, str]],
+    current_commence_by_id: dict[str, str],
+    now: datetime,
+) -> tuple[list[str], list[tuple[str, str]]]:
+    """Separa los eventos de una ráfaga de cierre en 'due' (capturar ya) y
+    'moved' (kickoff aplazado a futuro: reprogramar la ráfaga, no capturar).
+
+    event_checks: [(event_id, commence_iso)] con el que se programó la ráfaga.
+    current_commence_by_id: commence actual por event_id según /events (coste 0).
+
+    Fail-open: un evento ausente de la respuesta o cuyo nuevo kickoff ya pasó se
+    captura igualmente -- mejor gastar el crédito que perder un cierre real.
+    """
+    due: list[str] = []
+    moved: list[tuple[str, str]] = []
+    for event_id, expected_iso in event_checks:
+        current_iso = current_commence_by_id.get(event_id)
+        if current_iso is None or current_iso == expected_iso:
+            due.append(event_id)
+            continue
+        new_commence = datetime.fromisoformat(current_iso.replace("Z", "+00:00"))
+        if new_commence <= now:
+            due.append(event_id)
+        else:
+            moved.append((event_id, current_iso))
+    return due, moved
+
+
 def plan_capture_times(
     events: list[dict],
     now: datetime,
