@@ -21,7 +21,8 @@ EVENTS_QUERY = """
 """
 
 TRAJECTORY_QUERY = """
-    SELECT soft_book, hours_to_commence, soft_odds, pinnacle_closing_odds, snapshot_role, captured_at
+    SELECT market, outcome, soft_book, hours_to_commence, soft_odds,
+           pinnacle_closing_odds, clv, snapshot_role, captured_at
     FROM clv_snapshots
     WHERE event_id = ?
     ORDER BY hours_to_commence DESC
@@ -138,10 +139,12 @@ def events(con: duckdb.DuckDBPyConnection) -> list[tuple]:
     return con.execute(EVENTS_QUERY).fetchall()
 
 
-def trajectory_for_event(con: duckdb.DuckDBPyConnection, event_id: str) -> list[tuple]:
-    """Todas las filas de clv_snapshots de un evento, para graficar la
-    trayectoria soft vs pinnacle según se acerca el cierre."""
-    return con.execute(TRAJECTORY_QUERY, [event_id]).fetchall()
+def trajectory_for_event(con: duckdb.DuckDBPyConnection, event_id: str):
+    """Todas las filas de clv_snapshots de un evento como DataFrame, para
+    graficar la trayectoria soft vs pinnacle según se acerca el cierre.
+    Incluye outcome: un chart por outcome, nunca mezclados (sus cuotas no
+    son comparables ni promediables)."""
+    return con.execute(TRAJECTORY_QUERY, [event_id]).fetchdf()
 
 
 def capture_health(con: duckdb.DuckDBPyConnection) -> list[tuple]:

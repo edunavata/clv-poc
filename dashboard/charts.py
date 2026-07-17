@@ -212,6 +212,33 @@ def trajectory_chart(traj: pd.DataFrame, closing_odds: float) -> alt.Chart:
     return (lines + points + closing).properties(height=320)
 
 
+def clv_trajectory_chart(traj: pd.DataFrame) -> alt.Chart:
+    """CLV del outcome a lo largo del tiempo (mismo eje X invertido que la
+    trayectoria de cuotas): cuándo se pudo capturar edge en este evento."""
+    scale = book_scale(traj["soft_book"])
+    x = alt.X(
+        "hours_to_commence:Q",
+        title="horas hasta el kickoff (0 = cierre)",
+        scale=alt.Scale(reverse=True),
+    )
+    lines = (
+        alt.Chart(traj)
+        .mark_line(strokeWidth=2, point=alt.OverlayMarkDef(size=60, filled=True))
+        .encode(
+            x=x,
+            y=alt.Y("clv:Q", title="CLV", axis=PCT_AXIS),
+            color=alt.Color("soft_book:N", scale=scale, title="book"),
+            tooltip=[
+                alt.Tooltip("soft_book", title="book"),
+                alt.Tooltip("clv", title="CLV", format=PCT_FMT),
+                alt.Tooltip("hours_to_commence", title="h al kickoff", format=".1f"),
+                alt.Tooltip("captured_at:T", title="capturado"),
+            ],
+        )
+    )
+    return (lines + _zero_rule()).properties(height=260)
+
+
 def capture_heatmap(heat: pd.DataFrame) -> alt.Chart:
     """Polls por día x sport. Escala secuencial anclada a lo esperado
     (ratio 1.0 = cadencia completa); los días a 0 delatan gaps."""
