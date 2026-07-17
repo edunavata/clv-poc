@@ -263,3 +263,48 @@ def test_partial_failure_isolates_targets(scheduler):
     assert "capture_bad_pre_0" in _capture_job_ids(scheduler, "bad"), (
         "fallo en un target borró la agenda de otro"
     )
+
+
+class TestClosingBurstRecheck:
+    """El job de cierre re-verifica el kickoff vía /events (0 créditos) antes de
+    gastar el crédito de /odds; si el partido se aplazó, reprograma la ráfaga."""
+
+    def _run(self, monkeypatch, scheduler, current_commence_iso=None, fail=False):
+        expected_iso = (datetime.now(UTC) + timedelta(minutes=6)).isoformat().replace("+00:00", "Z")
+        target = _target("t1", "soccer_test")
+        monkeypatch.setattr("config.load_config", lambda: _config([target]))
+
+        events = [] if current_commence_iso is None else [
+            {"id": "evt1", "commence_time": current_commence_iso}
+        ]
+        fake = FakeClient({"soccer_test": events}, fail_sports={"soccer_test"} if fail else ())
+        monkeypatch.setattr("client.odds_api.OddsApiClient", lambda: fake)
+
+        captured = []
+        monkeypatch.setattr(daemon, "capture_target", lambda *a, **k: captured.append(a) or type(
+            "R", (), {"ok": True, "reason": ""}
+        )())
+
+        daemon.run_capture_job(
+            "t1", ":memory:", 50, is_closing=True,
+            event_checks=[("evt1", expected_iso)], scheduler=scheduler,
+        )
+        return captured, expected_iso
+
+    def test_postponed_skips_capture_and_reschedules(self, monkeypatch, scheduler):
+        new_iso = (datetime.now(UTC) + timedelta(hours=1)).isoformat().replace("+00:00", "Z")
+        captured, _ = self._run(monkeypatch, scheduler, current_commence_iso=new_iso)
+
+        assert captured == []  # crédito de /odds ahorrado
+        moved_jobs = [j for j in scheduler.get_jobs() if "_moved_evt1_" in j.id]
+        assert len(moved_jobs) == 2  # ráfaga -6/-2 min sobre el nuevo kickoff
+
+    def test_unchanged_commence_captures(self, monkeypatch, scheduler):
+        captured, expected_iso = self._run(monkeypatch, scheduler)
+        # el fake devuelve [] (evento ausente) => fail-open, captura
+        assert len(captured) == 1
+        assert not [j for j in scheduler.get_jobs() if "_moved_" in j.id]
+
+    def test_events_endpoint_down_captures_anyway(self, monkeypatch, scheduler):
+        captured, _ = self._run(monkeypatch, scheduler, fail=True)
+        assert len(captured) == 1

@@ -13,7 +13,7 @@ rellenado.
 import logging
 import sys
 import time
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.date import DateTrigger
@@ -21,7 +21,12 @@ from apscheduler.triggers.date import DateTrigger
 from client.odds_api import OddsApiClient
 from config import AppConfig, load_config, load_dotenv
 from scheduler.capture import capture_target
-from scheduler.planning import DISCOVERY_INTERVAL_HOURS, plan_capture_times
+from scheduler.planning import (
+    CLOSE_BURST_MINUTES,
+    DISCOVERY_INTERVAL_HOURS,
+    plan_capture_times,
+    split_due_and_moved,
+)
 from storage.db import get_connection
 
 import os
@@ -59,7 +64,49 @@ def discover_events(client: OddsApiClient, sport_key: str) -> list[dict]:
         return []
 
 
-def run_capture_job(target_name: str, db_path: str, min_credits: int, is_closing: bool = False):
+def reschedule_moved_burst(
+    scheduler: BackgroundScheduler,
+    target_name: str,
+    db_path: str,
+    min_credits: int,
+    moved: list[tuple[str, str]],
+    now: datetime,
+) -> None:
+    """Reprograma la ráfaga de cierre de eventos cuyo kickoff se aplazó.
+
+    Los jobs llevan el prefijo capture_{target}_ para que el siguiente discovery
+    los reemplace igual que al resto de la agenda."""
+    for event_id, new_iso in moved:
+        new_commence = datetime.fromisoformat(new_iso.replace("Z", "+00:00"))
+        for minutes in CLOSE_BURST_MINUTES:
+            run_at = new_commence - timedelta(minutes=minutes)
+            if run_at <= now:
+                continue
+            scheduler.add_job(
+                run_capture_job,
+                trigger=DateTrigger(run_date=run_at),
+                args=[target_name, db_path, min_credits, True],
+                kwargs={"event_checks": [(event_id, new_iso)], "scheduler": scheduler},
+                id=f"capture_{target_name}_moved_{event_id}_{run_at.timestamp()}",
+                replace_existing=True,
+                misfire_grace_time=90,
+            )
+        logger.info(
+            "Kickoff aplazado: ráfaga de %s reprogramada a %s para evento %s",
+            target_name,
+            new_iso,
+            event_id,
+        )
+
+
+def run_capture_job(
+    target_name: str,
+    db_path: str,
+    min_credits: int,
+    is_closing: bool = False,
+    event_checks: list[tuple[str, str]] | None = None,
+    scheduler: BackgroundScheduler | None = None,
+):
     # Aislar imports e instanciación para el worker del job
     from client.odds_api import OddsApiClient
     from config import load_config
@@ -70,6 +117,32 @@ def run_capture_job(target_name: str, db_path: str, min_credits: int, is_closing
         return
 
     client = OddsApiClient()
+
+    # Recheck de aplazamientos antes de gastar el crédito de /odds: la ráfaga se
+    # programó en el discovery y el kickoff puede haberse movido después (meteo,
+    # retrasos). /events cuesta 0 créditos. Fail-open: si el recheck falla, se
+    # captura igualmente.
+    if is_closing and event_checks and scheduler is not None:
+        try:
+            events = client.get_events(targets[0].sport_key)  # coste 0
+            current = {e["id"]: e["commence_time"] for e in events}
+        except Exception as e:
+            logger.warning(
+                "Recheck de commence falló para %s (%s); capturo igualmente", target_name, e
+            )
+            current = None
+        if current is not None:
+            now = datetime.now(UTC)
+            due, moved = split_due_and_moved(event_checks, current, now)
+            if moved:
+                reschedule_moved_burst(scheduler, target_name, db_path, min_credits, moved, now)
+            if not due:
+                logger.info(
+                    "Ráfaga de %s omitida: kickoff(s) aplazados, crédito de /odds ahorrado",
+                    target_name,
+                )
+                return
+
     con = get_connection(db_path)
     captured_at = datetime.now(UTC)
     result = capture_target(client, con, targets[0], min_credits, captured_at, is_closing=is_closing)
@@ -110,10 +183,21 @@ def schedule_captures(
 
         for i, pc in enumerate(planned):
             job_id = f"capture_{target.name}_{i}_{pc.run_at.timestamp()}"
+            # Las ráfagas de cierre llevan sus eventos esperados para el recheck de
+            # aplazamientos justo antes de disparar (ver run_capture_job).
+            job_kwargs = (
+                {
+                    "event_checks": [(e["id"], e["commence_time"]) for e in pc.events],
+                    "scheduler": scheduler,
+                }
+                if pc.is_closing and pc.events
+                else {}
+            )
             scheduler.add_job(
                 run_capture_job,
                 trigger=DateTrigger(run_date=pc.run_at),
                 args=[target.name, config.db_path, config.min_remaining_credits, pc.is_closing],
+                kwargs=job_kwargs,
                 id=job_id,
                 replace_existing=True,
                 # Default de APScheduler es 1s: un retraso mínimo (hilo ocupado, sleep
