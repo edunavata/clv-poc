@@ -126,14 +126,16 @@ def clv_vs_horizon(buckets: pd.DataFrame) -> alt.Chart:
 def clv_by_sport(stats: pd.DataFrame) -> alt.Chart:
     """CLV medio book x deporte. El h2h 3-way de fútbol y el 2-way de MLB
     tienen devig distinto: no se promedian juntos."""
+    # Horizontal + facet por fila: los nombres de books son largos y en
+    # vertical facetado se solapan.
     return (
         alt.Chart(stats)
-        .mark_bar(size=18, cornerRadiusEnd=4)
+        .mark_bar(size=16, cornerRadiusEnd=4)
         .encode(
-            x=alt.X("soft_book:N", title=None, axis=alt.Axis(labelAngle=-30)),
-            y=alt.Y("avg_clv:Q", title="CLV medio", axis=PCT_AXIS),
+            y=alt.Y("soft_book:N", title=None),
+            x=alt.X("avg_clv:Q", title="CLV medio", axis=PCT_AXIS),
             color=alt.Color("soft_book:N", scale=book_scale(stats["soft_book"]), legend=None),
-            column=alt.Column("sport_key:N", title=None),
+            row=alt.Row("sport_key:N", title=None, header=alt.Header(labelFontWeight="bold")),
             tooltip=[
                 alt.Tooltip("sport_key", title="deporte"),
                 alt.Tooltip("soft_book", title="book"),
@@ -142,7 +144,7 @@ def clv_by_sport(stats: pd.DataFrame) -> alt.Chart:
                 alt.Tooltip("hit_rate", title="hit-rate", format=".0%"),
             ],
         )
-        .properties(height=240)
+        .properties(height=110, width=520)
     )
 
 
@@ -246,7 +248,14 @@ def capture_heatmap(heat: pd.DataFrame) -> alt.Chart:
         alt.Chart(heat)
         .mark_rect(stroke="#fcfcfb", strokeWidth=2)
         .encode(
-            x=alt.X("day:T", title=None, axis=alt.Axis(format="%d %b")),
+            # Ordinal, no temporal: cada día es una celda discreta. Con eje T
+            # continuo los rects se estiran hasta el siguiente dato y los gaps
+            # desaparecen visualmente.
+            x=alt.X(
+                "yearmonthdate(day):O",
+                title=None,
+                axis=alt.Axis(format="%d %b", labelAngle=-45),
+            ),
             y=alt.Y("sport_key:N", title=None),
             color=alt.Color(
                 "ratio:Q",

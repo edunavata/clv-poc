@@ -27,10 +27,7 @@ st.set_page_config(page_title="CLV POC", layout="wide")
 load_dotenv()
 
 pages = [
-    st.Page(
-        overview.render, title="Go / No-Go", icon=":material/flag:",
-        url_path="overview", default=True,
-    ),
+    st.Page(overview.render, title="Go / No-Go", icon=":material/flag:", default=True),
     st.Page(events.render, title="Trayectorias", icon=":material/show_chart:", url_path="events"),
     st.Page(
         operations.render, title="Operaciones", icon=":material/monitor_heart:",
